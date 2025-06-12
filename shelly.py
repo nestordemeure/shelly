@@ -6,7 +6,6 @@ Shelly - An LLM-based terminal assistant powered by Claude Haiku
 import os
 import sys
 import subprocess
-import json
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import anthropic
@@ -15,121 +14,6 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-class ShellTool:
-    """Base class for shell tools"""
-    def __init__(self, name: str, requires_validation: bool = False):
-        self.name = name
-        self.requires_validation = requires_validation
-    
-    def execute(self, args: List[str]) -> Dict[str, Any]:
-        """Execute the tool with given arguments"""
-        raise NotImplementedError
-
-class LsTool(ShellTool):
-    """Tool for listing directory contents"""
-    def __init__(self):
-        super().__init__("ls", requires_validation=False)
-    
-    def execute(self, args: List[str]) -> Dict[str, Any]:
-        try:
-            cmd = ["ls"] + args
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            return {
-                "success": result.returncode == 0,
-                "output": result.stdout,
-                "error": result.stderr,
-                "command": " ".join(cmd)
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "output": "",
-                "error": str(e),
-                "command": " ".join(["ls"] + args)
-            }
-
-class PwdTool(ShellTool):
-    """Tool for printing working directory"""
-    def __init__(self):
-        super().__init__("pwd", requires_validation=False)
-    
-    def execute(self, args: List[str]) -> Dict[str, Any]:
-        try:
-            cmd = ["pwd"] + args
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            return {
-                "success": result.returncode == 0,
-                "output": result.stdout,
-                "error": result.stderr,
-                "command": " ".join(cmd)
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "output": "",
-                "error": str(e),
-                "command": " ".join(["pwd"] + args)
-            }
-
-class WhichTool(ShellTool):
-    """Tool for locating commands and checking if they are installed"""
-    def __init__(self):
-        super().__init__("which", requires_validation=False)
-    
-    def execute(self, args: List[str]) -> Dict[str, Any]:
-        try:
-            cmd = ["which"] + args
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            return {
-                "success": result.returncode == 0,
-                "output": result.stdout,
-                "error": result.stderr,
-                "command": " ".join(cmd)
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "output": "",
-                "error": str(e),
-                "command": " ".join(["which"] + args)
-            }
-
-class RunTool(ShellTool):
-    """Tool for running arbitrary shell commands or sequences of commands"""
-    def __init__(self):
-        super().__init__("run", requires_validation=True)
-    
-    def execute(self, commands: List[str]) -> Dict[str, Any]:
-        """Execute a list of commands sequentially"""
-        if isinstance(commands, str):
-            commands = [commands]
-        
-        outputs = []
-        errors = []
-        all_successful = True
-        
-        for cmd in commands:
-            try:
-                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-                outputs.append(f"$ {cmd}\n{result.stdout}")
-                if result.stderr:
-                    errors.append(f"$ {cmd}\n{result.stderr}")
-                if result.returncode != 0:
-                    all_successful = False
-                    # Stop on first error
-                    break
-            except Exception as e:
-                errors.append(f"$ {cmd}\nException: {str(e)}")
-                all_successful = False
-                break
-        
-        return {
-            "success": all_successful,
-            "output": "\n".join(outputs),
-            "error": "\n".join(errors),
-            "command": " && ".join(commands)
-        }
-
 class Shelly:
     """Main Shelly assistant class"""
     
@@ -137,26 +21,81 @@ class Shelly:
         # Initialize Anthropic client
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not found")
+            raise ValueError("ANTHROPIC_API_KEY not found in .env file")
         
         self.client = anthropic.Anthropic(api_key=api_key)
         
-        # Initialize tools
-        self.tools = {
-            "ls": LsTool(),
-            "pwd": PwdTool(),
-            "which": WhichTool(),
-            "run": RunTool()
-        }
-        
-        # Get last unique shell commands from history
+        # Get last 100 unique shell commands from history
         self.command_history = self._get_command_history()
         
         # Define system prompt
         self.system_prompt = self._create_system_prompt()
+        
+        # Define tools for the API
+        self.tools = [
+            {
+                "name": "ls",
+                "description": "List directory contents with any options",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments to pass to ls command",
+                            "default": []
+                        }
+                    }
+                }
+            },
+            {
+                "name": "pwd",
+                "description": "Print working directory",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments to pass to pwd command",
+                            "default": []
+                        }
+                    }
+                }
+            },
+            {
+                "name": "which",
+                "description": "Locate a command and check if it's installed. Use this to verify if programs like 'convert' (ImageMagick) are available.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "command": {
+                            "type": "string",
+                            "description": "The command name to locate"
+                        }
+                    },
+                    "required": ["command"]
+                }
+            },
+            {
+                "name": "run",
+                "description": "Execute one or more shell commands sequentially (requires user validation)",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "commands": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of shell commands to execute in sequence"
+                        }
+                    },
+                    "required": ["commands"]
+                }
+            }
+        ]
     
-    def _get_command_history(self, nb_commands:int=100) -> List[str]:
-        """Get last unique commands from shell history"""
+    def _get_command_history(self, nb_commands: int = 100) -> List[str]:
+        """Get last nb_commands unique commands from shell history"""
         history_file = Path.home() / ".bash_history"
         if not history_file.exists():
             history_file = Path.home() / ".zsh_history"
@@ -186,68 +125,113 @@ class Shelly:
         history_section = ""
         if self.command_history:
             history_section = f"\n\nHere are the last {len(self.command_history)} unique commands from the user's shell history for inspiration:\n"
-            history_section += "\n".join(f"- {cmd}" for cmd in self.command_history)
+            history_section += "\n".join(f"- {cmd}" for cmd in self.command_history[-20:])  # Show last 20 for brevity
         
         return f"""You are Shelly, a helpful terminal assistant. Your role is to help users run shell commands effectively.
 
-You have access to the following tools:
-- ls: Run ls with any options to list directory contents (no validation needed)
-- pwd: Run pwd to show the current working directory (no validation needed)
-- which: Run which to locate commands (no validation needed)
-- run: Execute arbitrary shell commands (requires user validation)
+You have access to tools to execute shell commands:
+- ls: List directory contents (no validation needed)
+- pwd: Show current working directory (no validation needed)
+- which: Check if commands are installed (no validation needed)
+- run: Execute shell commands (requires user validation)
 
-When using tools, respond with a JSON object in this format:
-{{"tool": "tool_name", "args": ["arg1", "arg2"], "command": "full command string"}}
+For simple tool calls (ls, pwd, which), just execute them directly without explaining what the tool does - the user knows what these basic commands do. Only explain the results if they're noteworthy or if the user asked a specific question about them.
 
-For the 'run' tool, use: {{"tool": "run", "command": "your shell command here"}}
-
-Always explain what each command does before suggesting to run it. Be helpful and educational.
+For the 'run' tool, explain what the commands will do before execution.
 {history_section}
 
-When a user asks you to do something, suggest appropriate commands, explain them, and then try to execute them."""
+When a user asks you to do something, use the appropriate tools to help them."""
     
-    def _parse_tool_call(self, response: str) -> Optional[Dict[str, Any]]:
-        """Parse tool call from assistant response"""
-        try:
-            # Look for JSON in the response
-            import re
-            json_match = re.search(r'\{[^{}]*"tool"[^{}]*\}', response)
-            if json_match:
-                return json.loads(json_match.group())
-        except Exception:
-            pass
-        return None
-    
-    def _execute_tool(self, tool_call: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a tool based on the parsed call"""
-        tool_name = tool_call.get("tool")
+    def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a tool based on the tool call from Claude"""
+        if tool_name == "ls":
+            args = tool_input.get("args", [])
+            cmd = ["ls"] + args
+            print(f"Running {' '.join(cmd)}")
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                return {
+                    "success": result.returncode == 0,
+                    "output": result.stdout,
+                    "error": result.stderr
+                }
+            except Exception as e:
+                return {"success": False, "output": "", "error": str(e)}
         
-        if tool_name not in self.tools:
-            return {"success": False, "error": f"Unknown tool: {tool_name}"}
+        elif tool_name == "pwd":
+            args = tool_input.get("args", [])
+            cmd = ["pwd"] + args
+            print(f"Running {' '.join(cmd)}")
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                return {
+                    "success": result.returncode == 0,
+                    "output": result.stdout,
+                    "error": result.stderr
+                }
+            except Exception as e:
+                return {"success": False, "output": "", "error": str(e)}
         
-        tool = self.tools[tool_name]
+        elif tool_name == "which":
+            command = tool_input.get("command", "")
+            cmd = ["which", command]
+            print(f"Running {' '.join(cmd)}")
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                return {
+                    "success": result.returncode == 0,
+                    "output": result.stdout,
+                    "error": result.stderr
+                }
+            except Exception as e:
+                return {"success": False, "output": "", "error": str(e)}
         
-        if tool_name == "run":
-            commands = tool_call.get("commands", tool_call.get("command", ""))
-            if not isinstance(commands, list):
-                commands = [commands] if commands else []
+        elif tool_name == "run":
+            commands = tool_input.get("commands", [])
+            if not commands:
+                return {"success": False, "output": "", "error": "No commands provided"}
             
-            if tool.requires_validation and commands:
-                print(f"\n🔧 About to run {len(commands)} command(s):")
-                for cmd in commands:
-                    print(f"   $ {cmd}")
-                response = input("\nExecute these commands? (yes/no): ").strip().lower()
-                if response not in ["yes", "y"]:
-                    reason = input("Why not? (this will help me adjust): ").strip()
-                    return {
-                        "success": False,
-                        "error": f"User declined: {reason}",
-                        "command": " && ".join(commands)
-                    }
-            return tool.execute(commands)
-        else:
-            args = tool_call.get("args", [])
-            return tool.execute(args)
+            # Ask for user validation
+            print("\n```bash")
+            for cmd in commands:
+                print(cmd)
+            print("```")
+            response = input("\nRun? (yes/no): ").strip().lower()
+            if response not in ["yes", "y"]:
+                reason = input("Why not? (this will help me adjust): ").strip()
+                return {
+                    "success": False,
+                    "output": "",
+                    "error": f"User declined: {reason}"
+                }
+            
+            # Execute commands
+            outputs = []
+            errors = []
+            all_successful = True
+            
+            for cmd in commands:
+                try:
+                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    if result.stdout:
+                        outputs.append(result.stdout.rstrip())
+                    if result.stderr:
+                        errors.append(result.stderr.rstrip())
+                    if result.returncode != 0:
+                        all_successful = False
+                        break
+                except Exception as e:
+                    errors.append(str(e))
+                    all_successful = False
+                    break
+            
+            return {
+                "success": all_successful,
+                "output": "\n".join(outputs),
+                "error": "\n".join(errors)
+            }
+        
+        return {"success": False, "output": "", "error": f"Unknown tool: {tool_name}"}
     
     def chat(self, initial_message: Optional[str] = None):
         """Start the chat interaction"""
@@ -265,44 +249,72 @@ When a user asks you to do something, suggest appropriate commands, explain them
         
         while True:
             try:
-                # Get response from Claude
+                # Get response from Claude with tools
                 response = self.client.messages.create(
                     model="claude-3-haiku-20240307",
                     system=self.system_prompt,
                     messages=messages,
-                    max_tokens=4000
+                    max_tokens=4000,
+                    tools=self.tools
                 )
                 
-                assistant_message = response.content[0].text
-                print(f"\n🐚 Shelly: {assistant_message}")
+                # Process the response
+                assistant_content = []
+                tool_results = []
                 
-                messages.append({"role": "assistant", "content": assistant_message})
+                for content in response.content:
+                    if content.type == "text":
+                        print(f"\n🐚 Shelly: {content.text}")
+                        assistant_content.append({
+                            "type": "text",
+                            "text": content.text
+                        })
+                    elif content.type == "tool_use":
+                        # Execute the tool
+                        result = self._execute_tool(content.name, content.input)
+                        
+                        # Display output for run tool
+                        if content.name == "run" and result["success"]:
+                            if result["output"]:
+                                print(f"\n```\n{result['output']}\n```")
+                        elif content.name == "run" and not result["success"]:
+                            if "User declined" not in result["error"]:
+                                print(f"\n❌ Error: {result['error']}")
+                        
+                        # Display output for other tools
+                        elif content.name in ["ls", "pwd", "which"]:
+                            if result["success"] and result["output"]:
+                                print(result['output'].rstrip())
+                            elif not result["success"]:
+                                print(f"❌ Error: {result['error']}")
+                        
+                        # Add tool use to assistant content
+                        assistant_content.append({
+                            "type": "tool_use",
+                            "id": content.id,
+                            "name": content.name,
+                            "input": content.input
+                        })
+                        
+                        # Prepare tool result
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": content.id,
+                            "content": result["output"] if result["success"] else f"Error: {result['error']}"
+                        })
                 
-                # Check for tool call
-                tool_call = self._parse_tool_call(assistant_message)
-                if tool_call:
-                    # Execute the tool
-                    result = self._execute_tool(tool_call)
-                    
-                    # Display the command that was run
-                    print(f"\n💻 Command: {result.get('command', 'N/A')}")
-                    
-                    if result["success"]:
-                        if result["output"]:
-                            print(f"✅ Output:\n{result['output']}")
-                        else:
-                            print("✅ Command executed successfully (no output)")
-                    else:
-                        print(f"❌ Error: {result['error']}")
-                    
-                    # Add the result to context
-                    result_message = f"Command '{result.get('command', 'N/A')}' "
-                    if result["success"]:
-                        result_message += f"succeeded with output:\n{result['output']}"
-                    else:
-                        result_message += f"failed with error:\n{result['error']}"
-                    
-                    messages.append({"role": "user", "content": result_message})
+                # Add assistant message to history
+                messages.append({
+                    "role": "assistant",
+                    "content": assistant_content
+                })
+                
+                # If there were tool uses, add the results and continue
+                if tool_results:
+                    messages.append({
+                        "role": "user",
+                        "content": tool_results
+                    })
                     continue
                 
                 # Get next user input

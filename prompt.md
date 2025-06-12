@@ -34,5 +34,30 @@ The `run` command should be able to run a *list* of commands, instead of being r
 ````md
 Great! Now let's make tool calling less verbose.
 
-When calling a tool, I only want what will be calle dto be displayed in a code block then, after the user (optionally) acceps to run the tool, and the tool returns, the output to also be displayed.
+Keep display minimal when calling a tool that does not need authorization (`ls`, etc). Those can be a simple `Running ls -l` with nothing printed before, nor an output displayed.
+
+When calling `run`, I only want what will be called to be displayed in a code block then, after the user accepts to run the tool, and the tool returns, the output to also be displayed.
+````
+
+````md
+Here is an example run:
+
+```md
+🐚 Shelly: Hi! I'm Shelly, your terminal assistant. Ask me to help you run any shell commands!
+
+You: list the files in this folder and subfolders
+
+🐚 Shelly: Okay, let's list the files in this folder and its subfolders.
+
+To do that, we can use the `ls` command with the `-R` option:
+
+{"tool": "ls", "args": ["-R"], "command": "ls -R"}
+
+The `-R` option will make `ls` recursively list all files and directories in the current directory and its subdirectories.
+
+This will show you all the files and folders in the current directory and any subdirectories. Let me know if you need anything else!
+Running ls -R
+```
+
+Instead of the json, I want to see a markdown code block of the command that will be run. Also since `ls` does not require authorization, no need to explain the command before running it.
 ````
