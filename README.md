@@ -8,20 +8,20 @@ You can describe what you want to do, and Shelly will propose the appropriate sh
 Once installed, run Shelly with:
 
 ```sh
-shelly
+$ shelly
 ```
 
 Or ask it a question directly:
 
 ```sh
-shelly list the files in this folder and its subfolders, by decreasing file size
+$ shelly list the files in this folder and its subfolders, by decreasing file size
 ```
 
-> ⚠️ **Privacy Note:** Shelly reads your recent shell history and local file/folder names. If privacy is a concern, consider forking the project and replacing Claude-Haiku with a local LLM.
+> ⚠️ **Privacy Note:** Shelly reads your recent shell history and local file/folder names before calling Claude-Haiku through their API. If privacy is a concern, consider forking the project and replacing Haiku with a local LLM.
 
 ## Installation
 
-### 1. Set Up the Environment
+### Set Up the Environment
 
 ```sh
 # Create and activate a virtual environment
@@ -29,10 +29,10 @@ python3 -m venv shelly-env
 source shelly-env/bin/activate
 
 # Install required dependencies
-pip install anthropic python-dotenv rich
+pip3 install anthropic python-dotenv rich
 ```
 
-### 2. Configure Your API Key
+### Configure Your API Key
 
 Create a `.env` file at the root of the project with your Anthropic API key:
 
@@ -40,7 +40,7 @@ Create a `.env` file at the root of the project with your Anthropic API key:
 echo "ANTHROPIC_API_KEY=your-api-key-here" > .env
 ```
 
-### 3. Add Shelly to Your Shell
+### Add Shelly to Your Shell
 
 To use `shelly` as a command in your terminal, add the following function to your `.bashrc`, `.zshrc`, or similar shell configuration file:
 
@@ -51,7 +51,7 @@ shelly() {
   set -a
   [ -f "$SHELLY_DIR/.env" ] && source "$SHELLY_DIR/.env"
   set +a
-  python "$SHELLY_DIR/shelly.py" "$@"
+  python3 "$SHELLY_DIR/shelly.py" "$@"
   deactivate
 }
 ```
