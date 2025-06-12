@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+Shelly - An LLM-based terminal assistant powered by Claude Haiku
+"""
+
 import os
 import sys
 import subprocess
@@ -67,7 +72,7 @@ class PwdTool(ShellTool):
             }
 
 class WhichTool(ShellTool):
-    """Tool for locating commands"""
+    """Tool for locating commands and checking if they are installed"""
     def __init__(self):
         super().__init__("which", requires_validation=False)
     
@@ -90,26 +95,40 @@ class WhichTool(ShellTool):
             }
 
 class RunTool(ShellTool):
-    """Tool for running arbitrary shell commands"""
+    """Tool for running arbitrary shell commands or sequences of commands"""
     def __init__(self):
         super().__init__("run", requires_validation=True)
     
-    def execute(self, command: str) -> Dict[str, Any]:
-        try:
-            result = subprocess.run(command, shell=True, capture_output=True, text=True)
-            return {
-                "success": result.returncode == 0,
-                "output": result.stdout,
-                "error": result.stderr,
-                "command": command
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "output": "",
-                "error": str(e),
-                "command": command
-            }
+    def execute(self, commands: List[str]) -> Dict[str, Any]:
+        """Execute a list of commands sequentially"""
+        if isinstance(commands, str):
+            commands = [commands]
+        
+        outputs = []
+        errors = []
+        all_successful = True
+        
+        for cmd in commands:
+            try:
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                outputs.append(f"$ {cmd}\n{result.stdout}")
+                if result.stderr:
+                    errors.append(f"$ {cmd}\n{result.stderr}")
+                if result.returncode != 0:
+                    all_successful = False
+                    # Stop on first error
+                    break
+            except Exception as e:
+                errors.append(f"$ {cmd}\nException: {str(e)}")
+                all_successful = False
+                break
+        
+        return {
+            "success": all_successful,
+            "output": "\n".join(outputs),
+            "error": "\n".join(errors),
+            "command": " && ".join(commands)
+        }
 
 class Shelly:
     """Main Shelly assistant class"""
@@ -137,7 +156,7 @@ class Shelly:
         self.system_prompt = self._create_system_prompt()
     
     def _get_command_history(self, nb_commands:int=100) -> List[str]:
-        """Get last nb_commands unique commands from shell history"""
+        """Get last unique commands from shell history"""
         history_file = Path.home() / ".bash_history"
         if not history_file.exists():
             history_file = Path.home() / ".zsh_history"
@@ -209,18 +228,23 @@ When a user asks you to do something, suggest appropriate commands, explain them
         tool = self.tools[tool_name]
         
         if tool_name == "run":
-            command = tool_call.get("command", "")
-            if tool.requires_validation:
-                print(f"\n🔧 About to run: {command}")
-                response = input("Execute this command? (yes/no): ").strip().lower()
+            commands = tool_call.get("commands", tool_call.get("command", ""))
+            if not isinstance(commands, list):
+                commands = [commands] if commands else []
+            
+            if tool.requires_validation and commands:
+                print(f"\n🔧 About to run {len(commands)} command(s):")
+                for cmd in commands:
+                    print(f"   $ {cmd}")
+                response = input("\nExecute these commands? (yes/no): ").strip().lower()
                 if response not in ["yes", "y"]:
                     reason = input("Why not? (this will help me adjust): ").strip()
                     return {
                         "success": False,
                         "error": f"User declined: {reason}",
-                        "command": command
+                        "command": " && ".join(commands)
                     }
-            return tool.execute(command)
+            return tool.execute(commands)
         else:
             args = tool_call.get("args", [])
             return tool.execute(args)

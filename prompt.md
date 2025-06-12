@@ -1,6 +1,6 @@
 # Prompt
 
-This was developed using Claude and the following prompt, plus some manual cleaning:
+This was developed using Claude (Opus) and the following prompts, plus some manual cleaning:
 
 ````md
 Write a `shelly.py` Python file. It will be an LLM-based terminal assistant.
@@ -23,6 +23,16 @@ Any command ran is displayed for the user to see what is happening.
 It will be based on Claude-Haiku, via the Anthropics API, using a dotfile (`.env`) to load the credentials.
 ````
 
+````md
+I cleaned up the file following my specifications. Let's work on the tools a bit.
+
+Improve on the `which` tool documentation to mention that it can be used to both locate a command, and ascertain whether it is available (ie, to see if a user has `convert` installed).
+
+The `run` command should be able to run a *list* of commands, instead of being restricted to one. That way we can get a single validation from the user for a block of code.
 ````
 
+````md
+Great! Now let's make tool calling less verbose.
+
+When calling a tool, I only want what will be calle dto be displayed in a code block then, after the user (optionally) acceps to run the tool, and the tool returns, the output to also be displayed.
 ````
