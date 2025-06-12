@@ -10,9 +10,15 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
+from rich.console import Console
+from rich.markdown import Markdown
+from rich.syntax import Syntax
 
 # Load environment variables
 load_dotenv()
+
+# Initialize rich console
+console = Console()
 
 class Shelly:
     """Main Shelly assistant class"""
@@ -135,7 +141,13 @@ You have access to tools to execute shell commands:
 - which: Check if commands are installed (no validation needed)
 - run: Execute shell commands (requires user validation)
 
-For simple tool calls (ls, pwd, which), just execute them directly without explaining what the tool does - the user knows what these basic commands do. Only explain the results if they're noteworthy or if the user asked a specific question about them.
+For simple tool calls (ls, pwd, which), be extremely concise - just state what you found or what happened. The user can see the command output directly, so don't repeat or explain it unless specifically asked.
+
+Examples of good responses after tool use:
+- "Yes, ImageMagick is installed!" (if which convert succeeds)
+- "ImageMagick is not installed." (if which convert fails)
+- "Here are your Python files:" (after ls *.py)
+- "You're in /home/user/projects" (after pwd)
 
 For the 'run' tool, explain what the commands will do before execution.
 {history_section}
@@ -147,43 +159,82 @@ When a user asks you to do something, use the appropriate tools to help them."""
         if tool_name == "ls":
             args = tool_input.get("args", [])
             cmd = ["ls"] + args
-            print(f"Running {' '.join(cmd)}")
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                # Display command and output in a code block
+                output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    output += result.stdout.rstrip()
+                elif result.returncode == 0:
+                    output += "(no output)"
+                else:
+                    output += f"Error: {result.stderr.rstrip()}"
+                
+                syntax = Syntax(output, "bash", theme="monokai", line_numbers=False)
+                console.print(syntax)
+                
                 return {
                     "success": result.returncode == 0,
                     "output": result.stdout,
                     "error": result.stderr
                 }
             except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
         
         elif tool_name == "pwd":
             args = tool_input.get("args", [])
             cmd = ["pwd"] + args
-            print(f"Running {' '.join(cmd)}")
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                # Display command and output in a code block
+                output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    output += result.stdout.rstrip()
+                elif result.returncode == 0:
+                    output += "(no output)"
+                else:
+                    output += f"Error: {result.stderr.rstrip()}"
+                
+                syntax = Syntax(output, "bash", theme="monokai", line_numbers=False)
+                console.print(syntax)
+                
                 return {
                     "success": result.returncode == 0,
                     "output": result.stdout,
                     "error": result.stderr
                 }
             except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
         
         elif tool_name == "which":
             command = tool_input.get("command", "")
             cmd = ["which", command]
-            print(f"Running {' '.join(cmd)}")
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                # Display command and output in a code block
+                output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    output += result.stdout.rstrip()
+                elif result.returncode == 0:
+                    output += "(no output)"
+                else:
+                    output += f"Error: command not found"
+                
+                syntax = Syntax(output, "bash", theme="monokai", line_numbers=False)
+                console.print(syntax)
+                
                 return {
                     "success": result.returncode == 0,
                     "output": result.stdout,
                     "error": result.stderr
                 }
             except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
         
         elif tool_name == "run":
@@ -191,44 +242,58 @@ When a user asks you to do something, use the appropriate tools to help them."""
             if not commands:
                 return {"success": False, "output": "", "error": "No commands provided"}
             
-            # Ask for user validation
-            print("\n```bash")
-            for cmd in commands:
-                print(cmd)
-            print("```")
-            response = input("\nRun? (yes/no): ").strip().lower()
+            # Display commands to be run
+            console.print("\n[bold]Commands to execute:[/bold]")
+            cmd_display = "\n".join(commands)
+            syntax = Syntax(cmd_display, "bash", theme="monokai", line_numbers=False)
+            console.print(syntax)
+            
+            response = console.input("\n[yellow]Run? (yes/no): [/yellow]").strip().lower()
             if response not in ["yes", "y"]:
-                reason = input("Why not? (this will help me adjust): ").strip()
+                reason = console.input("[yellow]Why not? (this will help me adjust): [/yellow]").strip()
                 return {
                     "success": False,
                     "output": "",
                     "error": f"User declined: {reason}"
                 }
             
-            # Execute commands
-            outputs = []
-            errors = []
+            # Execute commands and display output
+            console.print()
+            all_output = []
             all_successful = True
             
             for cmd in commands:
                 try:
                     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+                    
+                    # Build output for this command
+                    cmd_output = f"$ {cmd}\n"
                     if result.stdout:
-                        outputs.append(result.stdout.rstrip())
+                        cmd_output += result.stdout.rstrip()
+                    elif result.returncode == 0:
+                        cmd_output += "(no output)"
+                    
                     if result.stderr:
-                        errors.append(result.stderr.rstrip())
+                        cmd_output += f"\n{result.stderr.rstrip()}"
+                    
+                    # Display this command's output
+                    syntax = Syntax(cmd_output, "bash", theme="monokai", line_numbers=False)
+                    console.print(syntax)
+                    
+                    all_output.append(result.stdout if result.stdout else "")
+                    
                     if result.returncode != 0:
                         all_successful = False
                         break
                 except Exception as e:
-                    errors.append(str(e))
+                    console.print(f"[red]❌ Error: {str(e)}[/red]")
                     all_successful = False
                     break
             
             return {
                 "success": all_successful,
-                "output": "\n".join(outputs),
-                "error": "\n".join(errors)
+                "output": "\n".join(all_output),
+                "error": "" if all_successful else "Command failed"
             }
         
         return {"success": False, "output": "", "error": f"Unknown tool: {tool_name}"}
@@ -238,11 +303,11 @@ When a user asks you to do something, use the appropriate tools to help them."""
         messages = []
         
         if initial_message:
-            print(f"🐚 Shelly: Processing your request: '{initial_message}'")
+            console.print(f"[bold cyan]🐚 Shelly:[/bold cyan] Processing your request: '{initial_message}'")
             messages.append({"role": "user", "content": initial_message})
         else:
-            print("🐚 Shelly: Hi! I'm Shelly, your terminal assistant. Ask me to help you run any shell commands!")
-            user_input = input("\nYou: ").strip()
+            console.print("[bold cyan]🐚 Shelly:[/bold cyan] Hi! I'm Shelly, your terminal assistant. Ask me to help you run any shell commands!")
+            user_input = console.input("\n[bold green]You:[/bold green] ").strip()
             if not user_input:
                 return
             messages.append({"role": "user", "content": user_input})
@@ -264,7 +329,10 @@ When a user asks you to do something, use the appropriate tools to help them."""
                 
                 for content in response.content:
                     if content.type == "text":
-                        print(f"\n🐚 Shelly: {content.text}")
+                        # Use rich markdown for better formatting
+                        md = Markdown(content.text)
+                        console.print("\n🐚 Shelly:", style="bold cyan")
+                        console.print(md)
                         assistant_content.append({
                             "type": "text",
                             "text": content.text
@@ -272,21 +340,6 @@ When a user asks you to do something, use the appropriate tools to help them."""
                     elif content.type == "tool_use":
                         # Execute the tool
                         result = self._execute_tool(content.name, content.input)
-                        
-                        # Display output for run tool
-                        if content.name == "run" and result["success"]:
-                            if result["output"]:
-                                print(f"\n```\n{result['output']}\n```")
-                        elif content.name == "run" and not result["success"]:
-                            if "User declined" not in result["error"]:
-                                print(f"\n❌ Error: {result['error']}")
-                        
-                        # Display output for other tools
-                        elif content.name in ["ls", "pwd", "which"]:
-                            if result["success"] and result["output"]:
-                                print(result['output'].rstrip())
-                            elif not result["success"]:
-                                print(f"❌ Error: {result['error']}")
                         
                         # Add tool use to assistant content
                         assistant_content.append({
@@ -318,19 +371,19 @@ When a user asks you to do something, use the appropriate tools to help them."""
                     continue
                 
                 # Get next user input
-                user_input = input("\nYou: ").strip()
+                user_input = console.input("\n[bold green]You:[/bold green] ").strip()
                 if not user_input or user_input.lower() in ["exit", "quit", "bye"]:
-                    print("\n🐚 Shelly: Goodbye! Happy coding!")
+                    console.print("\n[bold cyan]🐚 Shelly:[/bold cyan] Goodbye! Happy coding!")
                     break
                 
                 messages.append({"role": "user", "content": user_input})
                 
             except KeyboardInterrupt:
-                print("\n\n🐚 Shelly: Goodbye! Happy coding!")
+                console.print("\n\n[bold cyan]🐚 Shelly:[/bold cyan] Goodbye! Happy coding!")
                 break
             except Exception as e:
-                print(f"\n❌ Error: {str(e)}")
-                print("Let me try to help you differently...")
+                console.print(f"\n[red]❌ Error: {str(e)}[/red]")
+                console.print("Let me try to help you differently...")
 
 def main():
     """Main entry point"""
@@ -345,11 +398,11 @@ def main():
             shelly.chat()
             
     except ValueError as e:
-        print(f"❌ Configuration error: {e}")
-        print("Please make sure you have a .env file with ANTHROPIC_API_KEY set.")
+        console.print(f"[red]❌ Configuration error: {e}[/red]")
+        console.print("Please make sure you have a .env file with ANTHROPIC_API_KEY set.")
         sys.exit(1)
     except Exception as e:
-        print(f"❌ Unexpected error: {e}")
+        console.print(f"[red]❌ Unexpected error: {e}[/red]")
         sys.exit(1)
 
 if __name__ == "__main__":

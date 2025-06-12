@@ -58,5 +58,4 @@ shelly() {
 
 ## TODO
 
-* use rich for nicer formatting
 * too verbose (authorized tool do not need explanation, tools should be a code block with what is about to run followed by the output)
