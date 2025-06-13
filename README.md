@@ -57,3 +57,7 @@ shelly() {
   deactivate
 }
 ```
+
+## TODO
+
+* add grep and find tools

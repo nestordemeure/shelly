@@ -1,3 +1,8 @@
+#!/usr/bin/env python3
+"""
+Shelly - An LLM-based terminal assistant powered by Claude Haiku
+"""
+
 import os
 import sys
 import subprocess
@@ -281,6 +286,13 @@ class Shelly:
         
         elif tool_name == "run":
             commands = tool_input.get("commands", [])
+            
+            # Handle case where a single string is passed instead of an array
+            if isinstance(commands, str):
+                commands = [commands]
+            elif not isinstance(commands, list):
+                return {"success": False, "output": "", "error": "Invalid commands format"}
+            
             if not commands:
                 return {"success": False, "output": "", "error": "No commands provided"}
             
