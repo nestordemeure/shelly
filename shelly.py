@@ -366,7 +366,14 @@ class Shelly:
         )
     
     def _is_greenlisted(self, command: str) -> bool:
-        """Check if a command is in the greenlist (safe to run without confirmation)"""
+        """Check if a command is in the greenlist (safe to run without confirmation),
+        and ensure it doesn't contain any shell operators."""
+        
+        # Disallow shell operators
+        shell_operators = [';', '&&', '||', '|', '>', '<', '&', '$(', '`']
+        if any(operator in command for operator in shell_operators):
+            return False
+        
         # Get the base command (first word)
         base_command = command.strip().split()[0] if command.strip() else ""
         
