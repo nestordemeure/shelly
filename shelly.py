@@ -2,6 +2,7 @@ import os
 import sys
 import subprocess
 import json
+import platform
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import anthropic
@@ -43,6 +44,9 @@ class Shelly:
         # Store original directory to restore on exit
         self.original_dir = os.getcwd()
         
+        # Get system info
+        self.os_info = self._get_system_info()
+        
         # Get last unique shell commands from history
         self.command_history = self._get_command_history(CONFIG['history']['max_commands'])
         
@@ -52,250 +56,45 @@ class Shelly:
         # Define tools for the API
         self.tools = [
             {
-                "name": "cd",
-                "description": "Change the current working directory",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "Directory path to change to (use ~ for home, .. for parent)",
-                            "default": "~"
-                        }
-                    }
-                }
-            },
-            {
-                "name": "ls",
-                "description": "List directory contents with any options",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Arguments to pass to ls command",
-                            "default": []
-                        }
-                    }
-                }
-            },
-            {
-                "name": "pwd",
-                "description": "Print working directory",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Arguments to pass to pwd command",
-                            "default": []
-                        }
-                    }
-                }
-            },
-            {
-                "name": "which",
-                "description": "Locate a command and check if it's installed. Use this to verify if programs like 'convert' (ImageMagick) are available.",
+                "name": "run_command",
+                "description": "Execute a single shell command. Use this for individual commands rather than complex shell scripts.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
                         "command": {
                             "type": "string",
-                            "description": "The command name to locate"
+                            "description": "The shell command to execute"
                         }
                     },
                     "required": ["command"]
                 }
             },
             {
-                "name": "grep",
-                "description": "Search for patterns in files. Supports recursive search with -r, case-insensitive with -i, and many other options.",
+                "name": "shell_script",
+                "description": "Execute a block of shell script code. Use this for multi-line scripts, complex command sequences with conditionals/loops, or when you need shell-specific features like pipes, redirections, or environment variable manipulation.",
                 "input_schema": {
                     "type": "object",
                     "properties": {
-                        "pattern": {
+                        "script": {
                             "type": "string",
-                            "description": "The pattern to search for"
-                        },
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Additional arguments like -r, -i, -n, -l, etc.",
-                            "default": []
-                        },
-                        "paths": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Files or directories to search in",
-                            "default": ["."]
+                            "description": "The shell script code to execute"
                         }
                     },
-                    "required": ["pattern"]
-                }
-            },
-            {
-                "name": "find",
-                "description": "Search for files and directories by name, type, size, or other criteria",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "Starting directory for the search",
-                            "default": "."
-                        },
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Find arguments like -name, -type, -size, etc.",
-                            "default": []
-                        }
-                    }
-                }
-            },
-            {
-                "name": "cat",
-                "description": "Display contents of files",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "files": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Files to display"
-                        },
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Additional arguments like -n for line numbers",
-                            "default": []
-                        }
-                    },
-                    "required": ["files"]
-                }
-            },
-            {
-                "name": "head",
-                "description": "Display first lines of files (default: 10 lines)",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "files": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Files to display"
-                        },
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Arguments like -n 20 to show 20 lines",
-                            "default": []
-                        }
-                    },
-                    "required": ["files"]
-                }
-            },
-            {
-                "name": "tail",
-                "description": "Display last lines of files (default: 10 lines)",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "files": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Files to display"
-                        },
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Arguments like -n 20 or -f for follow",
-                            "default": []
-                        }
-                    },
-                    "required": ["files"]
-                }
-            },
-            {
-                "name": "wc",
-                "description": "Count lines, words, and characters in files",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "files": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Files to count",
-                            "default": []
-                        },
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Arguments like -l (lines), -w (words), -c (bytes)",
-                            "default": []
-                        }
-                    }
-                }
-            },
-            {
-                "name": "du",
-                "description": "Display disk usage of files and directories",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "paths": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Paths to check",
-                            "default": ["."]
-                        },
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Arguments like -h (human readable), -s (summary)",
-                            "default": ["-h"]
-                        }
-                    }
-                }
-            },
-            {
-                "name": "tree",
-                "description": "Display directory structure as a tree (if installed)",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "path": {
-                            "type": "string",
-                            "description": "Directory to display",
-                            "default": "."
-                        },
-                        "args": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "Arguments like -L 2 (depth), -a (all files)",
-                            "default": []
-                        }
-                    }
-                }
-            },
-            {
-                "name": "run",
-                "description": "Execute one or more shell commands sequentially (requires user validation)",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "commands": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "description": "List of shell commands to execute in sequence"
-                        }
-                    },
-                    "required": ["commands"]
+                    "required": ["script"]
                 }
             }
         ]
+    
+    def _get_system_info(self) -> Dict[str, str]:
+        """Get OS and shell information"""
+        shell = os.environ.get('SHELL', 'unknown')
+        if shell == 'unknown' and platform.system() == 'Windows':
+            shell = os.environ.get('COMSPEC', 'cmd.exe')
+        
+        return {
+            "os": f"{platform.system()} {platform.release()}",
+            "shell": os.path.basename(shell)
+        }
     
     def _get_command_history(self, max_commands: int) -> List[str]:
         """Get last nb_commands unique commands from shell history"""
@@ -321,6 +120,25 @@ class Shelly:
             except Exception:
                 pass
         
+        # If no history file or it's empty, try using the history command
+        if not commands:
+            try:
+                result = subprocess.run(['history', str(max_commands)], 
+                                      capture_output=True, text=True, shell=True)
+                if result.returncode == 0 and result.stdout:
+                    # Parse history output (typically "NUMBER COMMAND")
+                    seen = set()
+                    for line in result.stdout.strip().split('\n'):
+                        # Remove leading number and whitespace
+                        parts = line.strip().split(maxsplit=1)
+                        if len(parts) > 1:
+                            cmd = parts[1]
+                            if cmd and cmd not in seen:
+                                seen.add(cmd)
+                                commands.append(cmd)
+            except Exception:
+                pass
+        
         return commands
     
     def _create_system_prompt(self) -> str:
@@ -331,18 +149,53 @@ class Shelly:
             with open(prompt_path, 'r') as f:
                 prompt_template = Template(f.read())
         except FileNotFoundError:
-            console.print(f"[red]Error: prompt.md not found at {prompt_path}[/red]")
-            raise ValueError("prompt.md file is required")
+            # Use a default prompt if file not found
+            prompt_template = Template("""You are Shelly, a helpful terminal assistant (running on $os_info with $shell_info shell). Your role is to help users run shell commands effectively.
+
+You have access to two tools:
+
+**run_command**: Execute a single shell command
+- Use for individual commands
+
+**shell_script**: Execute a block of shell script code
+- Use for complex scripts, loops, conditionals, or multi-line operations
+
+When you use these tools, explain what the command or script will do before executing it, especially for non-trivial operations. This helps users understand what will happen.
+
+If a user stops a command or script from running, they'll provide feedback explaining why. Use this feedback to understand their concerns and adjust your approach accordingly.
+
+$history_section
+
+When a user asks you to do something, use the appropriate tools to help them.""")
         
         # Prepare history section
         history_section = ""
         if self.command_history:
             display_count = CONFIG['history']['display_count']
-            history_section = f"\n\nHere are the last {min(len(self.command_history), display_count)} unique commands from the user's shell history for inspiration:\n"
+            history_section = f"\n\nHere are the last {min(len(self.command_history), display_count)} unique commands from the user's shell history for context:\n"
             history_section += "\n".join(f"- {cmd}" for cmd in self.command_history[-display_count:])
         
         # Substitute variables in the template
-        return prompt_template.substitute(history_section=history_section)
+        return prompt_template.substitute(
+            os_info=self.os_info["os"],
+            shell_info=self.os_info["shell"],
+            history_section=history_section
+        )
+    
+    def _is_greenlisted(self, command: str) -> bool:
+        """Check if a command is in the greenlist (safe to run without confirmation)"""
+        # Get the base command (first word)
+        base_command = command.strip().split()[0] if command.strip() else ""
+        
+        # Get greenlist from config, default to read-only commands
+        greenlist = CONFIG.get('greenlist_commands', [
+            'ls', 'pwd', 'which', 'grep', 'find', 'cat', 'head', 'tail',
+            'wc', 'du', 'tree', 'echo', 'date', 'whoami', 'hostname',
+            'uname', 'id', 'groups', 'env', 'printenv', 'type', 'file',
+            'stat', 'readlink', 'basename', 'dirname', 'realpath'
+        ])
+        
+        return base_command in greenlist
     
     def _truncate_output(self, output: str) -> tuple[str, bool]:
         """Truncate output if it's too long, return (truncated_output, was_truncated)"""
@@ -366,383 +219,121 @@ class Shelly:
         
         return output, was_truncated
     
-    def _get_list_param(self, tool_input: Dict[str, Any], param_name: str, default: List[str] = None) -> List[str]:
-        """Safely get a list parameter from tool input, handling string inputs"""
-        if default is None:
-            default = []
+    def _format_command_output(self, command: str, stdout: str, stderr: str, returncode: int) -> str:
+        """Format command output for display"""
+        output = f"$ {command}\n"
         
-        value = tool_input.get(param_name, default)
+        if stdout:
+            output += stdout.rstrip()
         
-        # If it's already a list, return it
-        if isinstance(value, list):
-            return [str(item) for item in value]  # Ensure all items are strings
+        if stderr and returncode != 0:
+            if stdout:
+                output += "\n"
+            output += f"Error: {stderr.rstrip()}"
         
-        # If it's a string, wrap it in a list
-        if isinstance(value, str):
-            return [value]
-        
-        # For any other type, return the default
-        return default
-    
-    def _handle_command_result(self, cmd: List[str], result: subprocess.CompletedProcess, 
-                              success_codes: List[int] = [0], no_output_msg: str = "(no output)") -> Dict[str, Any]:
-        """Handle command result display and API response consistently"""
-        # Display command and output
-        console.print()
-        display_output = f"$ {' '.join(cmd)}\n"
-        
-        if result.stdout:
-            display_output += result.stdout.rstrip()
-        elif result.returncode in success_codes:
-            display_output += no_output_msg
-        else:
-            # For errors, show stderr or a generic error message
-            if result.stderr:
-                display_output += result.stderr.rstrip()
+        if not stdout and not stderr:
+            if returncode == 0:
+                output += "(no output)"
             else:
-                display_output += f"Error: Command failed with exit code {result.returncode}"
+                output += f"Error: Command failed with exit code {returncode}"
         
-        syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-        console.print(syntax)
-        
-        # Prepare API response with full error information
-        is_success = result.returncode in success_codes
-        
-        # For API, include both stdout and stderr when there's an error
-        if is_success:
-            api_output, was_truncated = self._truncate_output(result.stdout)
-            if was_truncated:
-                api_output = f"[Output truncated]\n{api_output}"
-            api_error = ""
-        else:
-            # For errors, provide full context to the model
-            api_output = result.stdout if result.stdout else ""
-            api_error = result.stderr if result.stderr else f"Command failed with exit code {result.returncode}"
-            
-            # If both stdout and stderr exist, combine them for context
-            if result.stdout and result.stderr:
-                combined = f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
-                combined_truncated, was_truncated = self._truncate_output(combined)
-                if was_truncated:
-                    api_error = f"[Output truncated]\n{combined_truncated}"
-                else:
-                    api_error = combined
-        
-        return {
-            "success": is_success,
-            "output": api_output,
-            "error": api_error
-        }
+        return output
     
     def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool based on the tool call from Claude"""
-        if tool_name == "cd":
-            path = tool_input.get("path", "~")
-            # Expand ~ to home directory
-            path = os.path.expanduser(path)
+        if tool_name == "run_command":
+            command = tool_input.get("command", "").strip()
+            if not command:
+                return {"success": False, "output": "", "error": "No command provided"}
             
-            try:
-                # Store current directory before changing
-                old_dir = os.getcwd()
-                
-                # Change directory
-                os.chdir(path)
-                new_dir = os.getcwd()
-                
-                # Display the change
-                console.print()
-                display_output = f"$ cd {tool_input.get('path', '~')}\n"
-                display_output += f"{old_dir} → {new_dir}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+            # Check if command needs validation
+            needs_validation = not self._is_greenlisted(command)
+            
+            if needs_validation:
+                # Display command to be run
+                console.print("\n[bold]Command to execute:[/bold]")
+                syntax = Syntax(command, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
                 console.print(syntax)
                 
+                response = console.input("\n[yellow]Run this command? (yes/no): [/yellow]").strip().lower()
+                if response not in ["yes", "y"]:
+                    reason = console.input("[yellow]Why not? (this will help me adjust): [/yellow]").strip()
+                    return {
+                        "success": False,
+                        "output": "",
+                        "error": f"User declined to run command: {reason}"
+                    }
+            
+            # Execute the command
+            try:
+                result = subprocess.run(command, shell=True, capture_output=True, text=True)
+                
+                # Format output for both display and API
+                formatted_output = self._format_command_output(command, result.stdout, result.stderr, result.returncode)
+                
+                # Truncate if needed
+                truncated_output, was_truncated = self._truncate_output(formatted_output)
+                
+                # Display to user
+                console.print()
+                syntax = Syntax(truncated_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                # Return same output to API (what user sees is what model gets)
                 return {
-                    "success": True,
-                    "output": f"Changed directory to {new_dir}",
+                    "success": result.returncode == 0,
+                    "output": truncated_output,
                     "error": ""
                 }
-            except FileNotFoundError:
-                console.print()
-                console.print(f"[red]❌ Error: Directory '{path}' not found[/red]")
-                return {"success": False, "output": "", "error": f"Directory not found: {path}"}
-            except PermissionError:
-                console.print()
-                console.print(f"[red]❌ Error: Permission denied for '{path}'[/red]")
-                return {"success": False, "output": "", "error": f"Permission denied: {path}"}
             except Exception as e:
-                console.print()
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
+                error_msg = f"Error executing command: {str(e)}"
+                console.print(f"\n[red]❌ {error_msg}[/red]")
+                return {"success": False, "output": "", "error": error_msg}
         
-        elif tool_name == "ls":
-            args = tool_input.get("args", [])
-            # Ensure args is a list
-            if isinstance(args, str):
-                args = [args]
-            elif not isinstance(args, list):
-                args = []
-            cmd = ["ls"] + args
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                # Display command and output in a code block
-                console.print()  # Add linebreak before code block
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                elif result.returncode == 0:
-                    display_output += "(no output)"
-                else:
-                    display_output += f"Error: {result.stderr.rstrip()}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                # Truncate output for the API if needed
-                api_output, was_truncated = self._truncate_output(result.stdout if result.returncode == 0 else result.stderr)
-                if was_truncated:
-                    api_output = f"[Output was truncated for brevity. Full output shown to user.]\n{api_output}"
-                
-                return {
-                    "success": result.returncode == 0,
-                    "output": api_output if result.returncode == 0 else "",
-                    "error": result.stderr if result.returncode != 0 else ""
-                }
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "pwd":
-            args = tool_input.get("args", [])
-            cmd = ["pwd"] + args
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                # Display command and output in a code block
-                console.print()  # Add linebreak before code block
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                elif result.returncode == 0:
-                    display_output += "(no output)"
-                else:
-                    display_output += f"Error: {result.stderr.rstrip()}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                # Truncate output for the API if needed
-                api_output, was_truncated = self._truncate_output(result.stdout)
-                if was_truncated:
-                    api_output = f"[Output was truncated for brevity. Full output shown to user.]\n{api_output}"
-                
-                return {
-                    "success": result.returncode == 0,
-                    "output": api_output,
-                    "error": result.stderr
-                }
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "which":
-            command = tool_input.get("command", "")
-            cmd = ["which", command]
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                # Display command and output in a code block
-                console.print()  # Add linebreak before code block
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                elif result.returncode == 0:
-                    display_output += "(no output)"
-                else:
-                    display_output += f"Error: command not found"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                # Truncate output for the API if needed
-                api_output, was_truncated = self._truncate_output(result.stdout)
-                if was_truncated:
-                    api_output = f"[Output was truncated for brevity. Full output shown to user.]\n{api_output}"
-                
-                return {
-                    "success": result.returncode == 0,
-                    "output": api_output,
-                    "error": result.stderr
-                }
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "grep":
-            pattern = tool_input.get("pattern", "")
-            args = self._get_list_param(tool_input, "args")
-            paths = self._get_list_param(tool_input, "paths", ["."])
-            cmd = ["grep"] + args + [pattern] + paths
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                # grep returns 1 for no matches, which is not an error
-                return self._handle_command_result(cmd, result, success_codes=[0, 1], no_output_msg="(no matches found)")
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "find":
-            path = tool_input.get("path", ".")
-            args = self._get_list_param(tool_input, "args")
-            cmd = ["find", path] + args
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                return self._handle_command_result(cmd, result, no_output_msg="(no results)")
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "cat":
-            files = self._get_list_param(tool_input, "files")
-            args = self._get_list_param(tool_input, "args")
-            cmd = ["cat"] + args + files
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                return self._handle_command_result(cmd, result, no_output_msg="(empty file)")
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "head":
-            files = self._get_list_param(tool_input, "files")
-            args = self._get_list_param(tool_input, "args")
-            cmd = ["head"] + args + files
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                return self._handle_command_result(cmd, result)
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "tail":
-            files = self._get_list_param(tool_input, "files")
-            args = self._get_list_param(tool_input, "args")
-            cmd = ["tail"] + args + files
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                return self._handle_command_result(cmd, result)
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "wc":
-            files = self._get_list_param(tool_input, "files")
-            args = self._get_list_param(tool_input, "args")
-            cmd = ["wc"] + args + files
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                return self._handle_command_result(cmd, result)
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "du":
-            paths = self._get_list_param(tool_input, "paths", ["."])
-            args = self._get_list_param(tool_input, "args", ["-h"])
-            cmd = ["du"] + args + paths
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                return self._handle_command_result(cmd, result)
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "tree":
-            path = tool_input.get("path", ".")
-            args = self._get_list_param(tool_input, "args")
-            cmd = ["tree"] + args + [path]
-            try:
-                result = subprocess.run(cmd, capture_output=True, text=True)
-                return self._handle_command_result(cmd, result)
-            except Exception as e:
-                console.print(f"[red]❌ Error: {str(e)}[/red]")
-                return {"success": False, "output": "", "error": str(e)}
-        
-        elif tool_name == "run":
-            commands = tool_input.get("commands", [])
+        elif tool_name == "shell_script":
+            script = tool_input.get("script", "").strip()
+            if not script:
+                return {"success": False, "output": "", "error": "No script provided"}
             
-            # Handle case where a single string is passed instead of an array
-            if isinstance(commands, str):
-                commands = [commands]
-            elif not isinstance(commands, list):
-                return {"success": False, "output": "", "error": "Invalid commands format"}
-            
-            # Ensure all items in commands are strings
-            commands = [str(cmd) for cmd in commands]
-            
-            if not commands:
-                return {"success": False, "output": "", "error": "No commands provided"}
-                return {"success": False, "output": "", "error": "No commands provided"}
-            
-            # Display commands to be run
-            console.print("\n[bold]Commands to execute:[/bold]")
-            cmd_display = "\n".join(commands)
-            syntax = Syntax(cmd_display, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+            # Always require validation for shell scripts
+            console.print("\n[bold]Shell script to execute:[/bold]")
+            syntax = Syntax(script, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
             console.print(syntax)
             
-            response = console.input("\n[yellow]Run? (yes/no): [/yellow]").strip().lower()
+            response = console.input("\n[yellow]Run this script? (yes/no): [/yellow]").strip().lower()
             if response not in ["yes", "y"]:
                 reason = console.input("[yellow]Why not? (this will help me adjust): [/yellow]").strip()
                 return {
                     "success": False,
                     "output": "",
-                    "error": f"User declined: {reason}"
+                    "error": f"User declined to run script: {reason}"
                 }
             
-            # Execute commands and display output
-            console.print()
-            all_output = []
-            all_successful = True
-            
-            for cmd in commands:
-                try:
-                    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-                    
-                    # Build output for this command
-                    cmd_output = f"$ {cmd}\n"
-                    if result.stdout:
-                        cmd_output += result.stdout.rstrip()
-                    elif result.returncode == 0:
-                        cmd_output += "(no output)"
-                    
-                    if result.stderr and result.returncode != 0:
-                        cmd_output += f"\n{result.stderr.rstrip()}"
-                    
-                    # Display this command's output
-                    syntax = Syntax(cmd_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                    console.print(syntax)
-                    
-                    # Truncate for API if needed
-                    api_output, was_truncated = self._truncate_output(result.stdout)
-                    if was_truncated:
-                        all_output.append(f"[Output truncated]\n{api_output}")
-                    else:
-                        all_output.append(result.stdout if result.stdout else "")
-                    
-                    if result.returncode != 0:
-                        all_successful = False
-                        break
-                except Exception as e:
-                    console.print(f"[red]❌ Error: {str(e)}[/red]")
-                    all_successful = False
-                    break
-            
-            return {
-                "success": all_successful,
-                "output": "\n".join(all_output),
-                "error": "" if all_successful else "Command failed"
-            }
+            # Execute the script
+            try:
+                result = subprocess.run(script, shell=True, capture_output=True, text=True)
+                
+                # Format output for both display and API
+                formatted_output = self._format_command_output("(shell script)", result.stdout, result.stderr, result.returncode)
+                
+                # Truncate if needed
+                truncated_output, was_truncated = self._truncate_output(formatted_output)
+                
+                # Display to user
+                console.print()
+                syntax = Syntax(truncated_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                # Return same output to API
+                return {
+                    "success": result.returncode == 0,
+                    "output": truncated_output,
+                    "error": ""
+                }
+            except Exception as e:
+                error_msg = f"Error executing script: {str(e)}"
+                console.print(f"\n[red]❌ {error_msg}[/red]")
+                return {"success": False, "output": "", "error": error_msg}
         
         return {"success": False, "output": "", "error": f"Unknown tool: {tool_name}"}
     
@@ -750,7 +341,6 @@ class Shelly:
         """Cleanup method to restore original directory"""
         try:
             os.chdir(self.original_dir)
-            #console.print(f"\n[dim]Restored to original directory: {self.original_dir}[/dim]")
         except Exception:
             pass  # Silently fail if we can't restore
     
@@ -806,7 +396,7 @@ class Shelly:
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": content.id,
-                            "content": result["output"] if result["success"] else f"Error: {result['error']}"
+                            "content": result["output"] if result["success"] else result["error"]
                         })
                 
                 # Add assistant message to history

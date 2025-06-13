@@ -59,13 +59,9 @@ shelly() {
 
 ## TODO
 
-* install: clone shelly and get into the folder
 
 * tweak the prompt (and code) to let the model know the authorisation will be authomaticlaly asked for, no need to do it manually
-* pass OS / shell type to the system prompt
-* `_handle_command_result`: the model should see the same thing as the human (modulo truncation) to help with debugging
 * does the model see the history? it does not look like it... there is no `.bash_history` file, but there is a `history` command
 
-* have a single `run` tool, and a green list of read-only commands and user added comands that do not need aproval?
 
 * refresh readme once all is said and done
