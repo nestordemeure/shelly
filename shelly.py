@@ -3,7 +3,7 @@ import sys
 import subprocess
 import json
 import platform
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
 import anthropic
 from dotenv import load_dotenv
@@ -11,6 +11,10 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.syntax import Syntax
 from string import Template
+import signal
+import threading
+import queue
+import time
 
 # Load environment variables
 load_dotenv()
@@ -30,6 +34,194 @@ except json.JSONDecodeError as e:
     console.print(f"[red]Error: Invalid JSON in config.json: {e}[/red]")
     sys.exit(1)
 
+class PersistentShell:
+    """Manages a persistent shell subprocess that maintains state across commands"""
+    
+    def __init__(self, shell_path: str):
+        self.shell_path = shell_path
+        self.process = None
+        self.output_queue = queue.Queue()
+        self.error_queue = queue.Queue()
+        self.output_thread = None
+        self.error_thread = None
+        self._start_shell()
+    
+    def _start_shell(self):
+        """Start the shell subprocess"""
+        # Start an interactive shell
+        if platform.system() == 'Windows':
+            # Windows: use cmd.exe or powershell
+            self.process = subprocess.Popen(
+                [self.shell_path],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=0,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if platform.system() == 'Windows' else 0
+            )
+        else:
+            # Unix-like: use the specified shell in interactive mode
+            self.process = subprocess.Popen(
+                [self.shell_path, '-i'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=0,
+                preexec_fn=os.setsid if platform.system() != 'Windows' else None
+            )
+        
+        # Start threads to read output
+        self.output_thread = threading.Thread(target=self._read_output, daemon=True)
+        self.error_thread = threading.Thread(target=self._read_error, daemon=True)
+        self.output_thread.start()
+        self.error_thread.start()
+        
+        # Give shell time to initialize and consume any startup messages
+        time.sleep(0.5)
+        self._clear_queues()
+    
+    def _read_output(self):
+        """Read stdout in a separate thread"""
+        while self.process and self.process.poll() is None:
+            try:
+                line = self.process.stdout.readline()
+                if line:
+                    self.output_queue.put(line)
+            except:
+                break
+    
+    def _read_error(self):
+        """Read stderr in a separate thread"""
+        while self.process and self.process.poll() is None:
+            try:
+                line = self.process.stderr.readline()
+                if line:
+                    self.error_queue.put(line)
+            except:
+                break
+    
+    def _clear_queues(self):
+        """Clear any pending output from queues"""
+        while not self.output_queue.empty():
+            try:
+                self.output_queue.get_nowait()
+            except queue.Empty:
+                break
+        while not self.error_queue.empty():
+            try:
+                self.error_queue.get_nowait()
+            except queue.Empty:
+                break
+    
+    def _collect_output(self, timeout: float = 0.5) -> tuple[str, str]:
+        """Collect output from queues with a timeout"""
+        stdout_lines = []
+        stderr_lines = []
+        end_time = time.time() + timeout
+        
+        # Keep collecting until timeout or both queues are empty
+        while time.time() < end_time:
+            got_output = False
+            
+            # Collect stdout
+            try:
+                while True:
+                    line = self.output_queue.get_nowait()
+                    stdout_lines.append(line)
+                    got_output = True
+            except queue.Empty:
+                pass
+            
+            # Collect stderr
+            try:
+                while True:
+                    line = self.error_queue.get_nowait()
+                    stderr_lines.append(line)
+                    got_output = True
+            except queue.Empty:
+                pass
+            
+            # If we got output, reset the timeout to wait for more
+            if got_output:
+                end_time = time.time() + 0.1
+            else:
+                time.sleep(0.01)
+        
+        return ''.join(stdout_lines), ''.join(stderr_lines)
+    
+    def run_command(self, command: str) -> tuple[str, str, int]:
+        """Run a command and return stdout, stderr, and return code"""
+        if not self.process or self.process.poll() is not None:
+            self._start_shell()
+        
+        # Clear any pending output
+        self._clear_queues()
+        
+        # Send command with a unique marker to detect completion
+        marker = f"SHELLY_MARKER_{time.time()}"
+        full_command = f"{command}\necho {marker} $?\n"
+        
+        try:
+            self.process.stdin.write(full_command)
+            self.process.stdin.flush()
+        except (BrokenPipeError, OSError):
+            # Shell died, restart it
+            self._start_shell()
+            self.process.stdin.write(full_command)
+            self.process.stdin.flush()
+        
+        # Collect output until we see our marker
+        stdout_lines = []
+        stderr_lines = []
+        return_code = 0
+        marker_found = False
+        
+        timeout = 30  # Maximum time to wait for command completion
+        start_time = time.time()
+        
+        while not marker_found and (time.time() - start_time) < timeout:
+            stdout_part, stderr_part = self._collect_output(0.1)
+            
+            # Check if marker is in stdout
+            if marker in stdout_part:
+                parts = stdout_part.split(marker)
+                stdout_lines.append(parts[0])
+                # Extract return code
+                marker_line = parts[1].strip().split('\n')[0]
+                try:
+                    return_code = int(marker_line.strip())
+                except (ValueError, IndexError):
+                    return_code = 0
+                marker_found = True
+            else:
+                stdout_lines.append(stdout_part)
+            
+            stderr_lines.append(stderr_part)
+        
+        stdout = ''.join(stdout_lines).rstrip()
+        stderr = ''.join(stderr_lines).rstrip()
+        
+        return stdout, stderr, return_code
+    
+    def close(self):
+        """Close the shell subprocess"""
+        if self.process:
+            try:
+                self.process.stdin.write("exit\n")
+                self.process.stdin.flush()
+                self.process.wait(timeout=2)
+            except:
+                # Force kill if exit doesn't work
+                if platform.system() == 'Windows':
+                    subprocess.run(['taskkill', '/F', '/T', '/PID', str(self.process.pid)], 
+                                 capture_output=True)
+                else:
+                    os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+            finally:
+                self.process = None
+
 class Shelly:
     """Main Shelly assistant class"""
     
@@ -41,11 +233,18 @@ class Shelly:
         
         self.client = anthropic.Anthropic(api_key=api_key)
         
-        # Store original directory to restore on exit
-        self.original_dir = os.getcwd()
-        
         # Get system info
         self.os_info = self._get_system_info()
+        
+        # Initialize persistent shell
+        shell_path = os.environ.get('SHELL', '/bin/bash')
+        if platform.system() == 'Windows':
+            shell_path = os.environ.get('COMSPEC', 'cmd.exe')
+        self.shell = PersistentShell(shell_path)
+        
+        # Get current working directory from the shell
+        stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
+        self.current_dir = stdout.strip()
         
         # Get last unique shell commands from history
         self.command_history = self._get_command_history(CONFIG['history']['max_commands'])
@@ -123,14 +322,12 @@ class Shelly:
         # If no history file or it's empty, try using the history command
         if not commands:
             try:
-                # Use bash -c to ensure we get the builtin history command
-                shell_cmd = f"{self.os_info['shell']} -c 'history {max_commands}'"
-                result = subprocess.run(shell_cmd, 
-                                      capture_output=True, text=True, shell=True)
-                if result.returncode == 0 and result.stdout:
+                # Use the persistent shell to get history
+                stdout, _, returncode = self.shell.run_command(f'history {max_commands}')
+                if returncode == 0 and stdout:
                     # Parse history output (typically "NUMBER COMMAND")
                     seen = set()
-                    for line in result.stdout.strip().split('\n'):
+                    for line in stdout.strip().split('\n'):
                         # Remove leading number and whitespace
                         parts = line.strip().split(maxsplit=1)
                         if len(parts) > 1:
@@ -250,12 +447,17 @@ class Shelly:
                         "error": f"User declined to run command: {reason}"
                     }
             
-            # Execute the command
+            # Execute the command using persistent shell
             try:
-                result = subprocess.run(command, shell=True, capture_output=True, text=True)
+                stdout, stderr, returncode = self.shell.run_command(command)
+                
+                # Update current directory if command was cd
+                if command.strip().startswith('cd'):
+                    new_stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
+                    self.current_dir = new_stdout.strip()
                 
                 # Format output for both display and API
-                formatted_output = self._format_command_output(command, result.stdout, result.stderr, result.returncode)
+                formatted_output = self._format_command_output(command, stdout, stderr, returncode)
                 
                 # Truncate if needed
                 truncated_output, was_truncated = self._truncate_output(formatted_output)
@@ -267,7 +469,7 @@ class Shelly:
                 
                 # Return same output to API (what user sees is what model gets)
                 return {
-                    "success": result.returncode == 0,
+                    "success": returncode == 0,
                     "output": truncated_output,
                     "error": ""
                 }
@@ -295,12 +497,33 @@ class Shelly:
                     "error": f"User declined to run script: {reason}"
                 }
             
-            # Execute the script
+            # Execute the script line by line using persistent shell
             try:
-                result = subprocess.run(script, shell=True, capture_output=True, text=True)
+                # Split script into lines and execute each
+                lines = script.strip().split('\n')
+                all_stdout = []
+                all_stderr = []
+                last_returncode = 0
+                
+                for line in lines:
+                    line = line.strip()
+                    if line and not line.startswith('#'):  # Skip empty lines and comments
+                        stdout, stderr, returncode = self.shell.run_command(line)
+                        if stdout:
+                            all_stdout.append(stdout)
+                        if stderr:
+                            all_stderr.append(stderr)
+                        last_returncode = returncode
+                        
+                        # Update current directory if command was cd
+                        if line.startswith('cd'):
+                            new_stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
+                            self.current_dir = new_stdout.strip()
                 
                 # Format output for both display and API
-                formatted_output = self._format_command_output("(shell script)", result.stdout, result.stderr, result.returncode)
+                combined_stdout = '\n'.join(all_stdout)
+                combined_stderr = '\n'.join(all_stderr)
+                formatted_output = self._format_command_output("(shell script)", combined_stdout, combined_stderr, last_returncode)
                 
                 # Truncate if needed
                 truncated_output, was_truncated = self._truncate_output(formatted_output)
@@ -312,7 +535,7 @@ class Shelly:
                 
                 # Return same output to API
                 return {
-                    "success": result.returncode == 0,
+                    "success": last_returncode == 0,
                     "output": truncated_output,
                     "error": ""
                 }
@@ -324,11 +547,9 @@ class Shelly:
         return {"success": False, "output": "", "error": f"Unknown tool: {tool_name}"}
     
     def cleanup(self):
-        """Cleanup method to restore original directory"""
-        try:
-            os.chdir(self.original_dir)
-        except Exception:
-            pass  # Silently fail if we can't restore
+        """Cleanup method to close the persistent shell"""
+        if hasattr(self, 'shell') and self.shell:
+            self.shell.close()
     
     def chat(self, initial_message: Optional[str] = None):
         """Start the chat interaction"""
