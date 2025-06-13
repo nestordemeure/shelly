@@ -750,7 +750,7 @@ class Shelly:
         """Cleanup method to restore original directory"""
         try:
             os.chdir(self.original_dir)
-            console.print(f"\n[dim]Restored to original directory: {self.original_dir}[/dim]")
+            #console.print(f"\n[dim]Restored to original directory: {self.original_dir}[/dim]")
         except Exception:
             pass  # Silently fail if we can't restore
     

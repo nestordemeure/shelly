@@ -1,7 +1,7 @@
 # Shelly
 
-**Shelly** is an LLM-powered shell assistant that understands and translates natural language into shell commands.
-You can describe what you want to do, and Shelly will propose the appropriate shell command, ask for your confirmation, and then execute it.
+**Shelly** is an LLM-powered shell assistant that understands and translates natural language into shell commands.  
+You can describe what you want to do, and Shelly will propose the appropriate shell commands, ask for your confirmation, and then execute them.
 
 ## Usage
 
@@ -17,15 +17,17 @@ Or ask it a question directly:
 $ shelly list the files in this folder and its subfolders, by decreasing file size
 ```
 
-You will find various parameters, such as the model used, in the `config.json` file.
+The `config.json` file lets you customize things like the model being used and list of greenlighted (read-only by default) commands that can run without requiring user confirmation.
 
 > ⚠️ **Privacy Note:** Shelly reads your recent shell history and local file/folder names before calling Claude-Haiku through their API. If privacy is a concern, consider forking the project and replacing Haiku with a local LLM.
 
 ## Installation
 
-### Set Up the Environment
-
 ```sh
+# Clone the repository
+git clone https://github.com/nestordemeure/shelly.git
+cd shelly
+
 # Create and activate a virtual environment
 python3 -m venv shelly-env
 source shelly-env/bin/activate
@@ -34,15 +36,12 @@ source shelly-env/bin/activate
 pip3 install anthropic python-dotenv rich
 ```
 
-### Configure Your API Key
-
-Create a `.env` file at the root of the project with your Anthropic API key:
+Configure your Anthropic API key by either adding it to your shell environment, 
+or creating a `.env` file in the project directory:
 
 ```sh
 echo "ANTHROPIC_API_KEY=your-api-key-here" > .env
 ```
-
-### Add Shelly to Your Shell
 
 To use `shelly` as a command in your terminal, add the following function to your `.bashrc`, `.zshrc`, or similar shell configuration file:
 
@@ -60,8 +59,13 @@ shelly() {
 
 ## TODO
 
-* no need to display `Restored to original directory: /home/nestor/Downloads/newmann`
+* install: clone shelly and get into the folder
+
+* tweak the prompt (and code) to let the model know the authorisation will be authomaticlaly asked for, no need to do it manually
 * pass OS / shell type to the system prompt
 * `_handle_command_result`: the model should see the same thing as the human (modulo truncation) to help with debugging
 * does the model see the history? it does not look like it... there is no `.bash_history` file, but there is a `history` command
+
+* have a single `run` tool, and a green list of read-only commands and user added comands that do not need aproval?
+
 * refresh readme once all is said and done
