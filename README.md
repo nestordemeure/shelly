@@ -17,6 +17,8 @@ Or ask it a question directly:
 $ shelly list the files in this folder and its subfolders, by decreasing file size
 ```
 
+You will find various parameters, such as the model used, in the `config.json` file.
+
 > ⚠️ **Privacy Note:** Shelly reads your recent shell history and local file/folder names before calling Claude-Haiku through their API. If privacy is a concern, consider forking the project and replacing Haiku with a local LLM.
 
 ## Installation
@@ -55,8 +57,3 @@ shelly() {
   deactivate
 }
 ```
-
-## TODO
-
-* put params in a dedicated json
-* not using run

@@ -1,0 +1,23 @@
+{
+    "model": {
+        "name": "claude-3-haiku-20240307",
+        "max_tokens": 4000
+    },
+    "history": {
+        "max_commands": 100,
+        "display_count": 100
+    },
+    "output_truncation": {
+        "max_lines": 50,
+        "max_characters": 4000
+    },
+    "display": {
+        "theme": "monokai",
+        "show_line_numbers": false
+    },
+    "prompts": {
+        "welcome_message": "Hi! I'm Shelly, your terminal assistant. Ask me to help you run any shell commands!",
+        "goodbye_message": "Goodbye! Happy coding!",
+        "error_message": "Let me try to help you differently..."
+    }
+}

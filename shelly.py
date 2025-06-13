@@ -1,11 +1,7 @@
-#!/usr/bin/env python3
-"""
-Shelly - An LLM-based terminal assistant powered by Claude Haiku
-"""
-
 import os
 import sys
 import subprocess
+import json
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import anthropic
@@ -13,12 +9,25 @@ from dotenv import load_dotenv
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.syntax import Syntax
+from string import Template
 
 # Load environment variables
 load_dotenv()
 
 # Initialize rich console
 console = Console()
+
+# Load configuration
+config_path = Path(__file__).parent / "config.json"
+try:
+    with open(config_path, 'r') as f:
+        CONFIG = json.load(f)
+except FileNotFoundError:
+    console.print(f"[red]Error: config.json not found at {config_path}[/red]")
+    sys.exit(1)
+except json.JSONDecodeError as e:
+    console.print(f"[red]Error: Invalid JSON in config.json: {e}[/red]")
+    sys.exit(1)
 
 class Shelly:
     """Main Shelly assistant class"""
@@ -27,12 +36,12 @@ class Shelly:
         # Initialize Anthropic client
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not found in .env file")
+            raise ValueError("ANTHROPIC_API_KEY not found")
         
         self.client = anthropic.Anthropic(api_key=api_key)
         
-        # Get last 100 unique shell commands from history
-        self.command_history = self._get_command_history()
+        # Get last unique shell commands from history
+        self.command_history = self._get_command_history(CONFIG['history']['max_commands'])
         
         # Define system prompt
         self.system_prompt = self._create_system_prompt()
@@ -100,8 +109,8 @@ class Shelly:
             }
         ]
     
-    def _get_command_history(self, nb_commands: int = 100) -> List[str]:
-        """Get last nb_commands unique commands from shell history"""
+    def _get_command_history(self, max_commands: int) -> List[str]:
+        """Get last max_commands unique commands from shell history"""
         history_file = Path.home() / ".bash_history"
         if not history_file.exists():
             history_file = Path.home() / ".zsh_history"
@@ -118,7 +127,7 @@ class Shelly:
                         if cmd and cmd not in seen:
                             seen.add(cmd)
                             commands.append(cmd)
-                            if len(commands) >= nb_commands:
+                            if len(commands) >= max_commands:
                                 break
                     commands.reverse()
             except Exception:
@@ -128,36 +137,30 @@ class Shelly:
     
     def _create_system_prompt(self) -> str:
         """Create the system prompt for Shelly"""
+        # Load prompt template from file
+        prompt_path = Path(__file__).parent / "prompt.md"
+        try:
+            with open(prompt_path, 'r') as f:
+                prompt_template = Template(f.read())
+        except FileNotFoundError:
+            console.print(f"[red]Error: prompt.md not found at {prompt_path}[/red]")
+            raise ValueError("prompt.md file is required")
+        
+        # Prepare history section
         history_section = ""
         if self.command_history:
-            history_section = f"\n\nHere are the last {len(self.command_history)} unique commands from the user's shell history for inspiration:\n"
-            history_section += "\n".join(f"- {cmd}" for cmd in self.command_history[-20:])  # Show last 20 for brevity
+            display_count = CONFIG['history']['display_count']
+            history_section = f"\n\nHere are the last {min(len(self.command_history), display_count)} unique commands from the user's shell history for inspiration:\n"
+            history_section += "\n".join(f"- {cmd}" for cmd in self.command_history[-display_count:])
         
-        return f"""You are Shelly, a helpful terminal assistant. Your role is to help users run shell commands effectively.
-
-You have access to tools to execute shell commands:
-- ls: List directory contents (no validation needed)
-- pwd: Show current working directory (no validation needed)
-- which: Check if commands are installed (no validation needed)
-- run: Execute shell commands (requires user validation)
-
-Don't hesitate to use the 'run' tool for ANY command beyond ls, pwd, and which. The 'run' tool is your gateway to the full power of the shell - use it liberally for commands like grep, find, cat, echo, mkdir, cp, mv, git, python, npm, or any other shell command the user needs. You're not limited to the basic tools!
-
-For simple tool calls (ls, pwd, which), be extremely concise - just state what you found or what happened. The user can see the command output directly, so don't repeat or explain it unless specifically asked.
-
-Examples of good responses after tool use:
-- "Yes, ImageMagick is installed!" (if which convert succeeds)
-- "ImageMagick is not installed." (if which convert fails)
-- "Here are your Python files:" (after ls *.py)
-- "You're in /home/user/projects" (after pwd)
-
-For the 'run' tool, explain what the commands will do before execution.
-{history_section}
-
-When a user asks you to do something, use the appropriate tools to help them."""
+        # Substitute variables in the template
+        return prompt_template.substitute(history_section=history_section)
     
-    def _truncate_output(self, output: str, max_lines: int = 50, max_chars: int = 4000) -> tuple[str, bool]:
+    def _truncate_output(self, output: str) -> tuple[str, bool]:
         """Truncate output if it's too long, return (truncated_output, was_truncated)"""
+        max_lines = CONFIG['output_truncation']['max_lines']
+        max_chars = CONFIG['output_truncation']['max_characters']
+        
         lines = output.split('\n')
         
         # Check if we need to truncate by lines
@@ -193,7 +196,7 @@ When a user asks you to do something, use the appropriate tools to help them."""
                 else:
                     display_output += f"Error: {result.stderr.rstrip()}"
                 
-                syntax = Syntax(display_output, "bash", theme="monokai", line_numbers=False)
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
                 console.print(syntax)
                 
                 # Truncate output for the API if needed
@@ -226,7 +229,7 @@ When a user asks you to do something, use the appropriate tools to help them."""
                 else:
                     display_output += f"Error: {result.stderr.rstrip()}"
                 
-                syntax = Syntax(display_output, "bash", theme="monokai", line_numbers=False)
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
                 console.print(syntax)
                 
                 # Truncate output for the API if needed
@@ -259,7 +262,7 @@ When a user asks you to do something, use the appropriate tools to help them."""
                 else:
                     display_output += f"Error: command not found"
                 
-                syntax = Syntax(display_output, "bash", theme="monokai", line_numbers=False)
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
                 console.print(syntax)
                 
                 # Truncate output for the API if needed
@@ -284,7 +287,7 @@ When a user asks you to do something, use the appropriate tools to help them."""
             # Display commands to be run
             console.print("\n[bold]Commands to execute:[/bold]")
             cmd_display = "\n".join(commands)
-            syntax = Syntax(cmd_display, "bash", theme="monokai", line_numbers=False)
+            syntax = Syntax(cmd_display, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
             console.print(syntax)
             
             response = console.input("\n[yellow]Run? (yes/no): [/yellow]").strip().lower()
@@ -316,7 +319,7 @@ When a user asks you to do something, use the appropriate tools to help them."""
                         cmd_output += f"\n{result.stderr.rstrip()}"
                     
                     # Display this command's output
-                    syntax = Syntax(cmd_output, "bash", theme="monokai", line_numbers=False)
+                    syntax = Syntax(cmd_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
                     console.print(syntax)
                     
                     # Truncate for API if needed
@@ -349,7 +352,7 @@ When a user asks you to do something, use the appropriate tools to help them."""
         if initial_message:
             messages.append({"role": "user", "content": initial_message})
         else:
-            console.print("[bold cyan]🐚 Shelly:[/bold cyan] Hi! I'm Shelly, your terminal assistant. Ask me to help you run any shell commands!")
+            console.print(f"[bold cyan]🐚 Shelly:[/bold cyan] {CONFIG['prompts']['welcome_message']}")
             user_input = console.input("\n[bold green]You:[/bold green] ").strip()
             if not user_input:
                 return
@@ -359,10 +362,10 @@ When a user asks you to do something, use the appropriate tools to help them."""
             try:
                 # Get response from Claude with tools
                 response = self.client.messages.create(
-                    model="claude-3-haiku-20240307",
+                    model=CONFIG['model']['name'],
                     system=self.system_prompt,
                     messages=messages,
-                    max_tokens=4000,
+                    max_tokens=CONFIG['model']['max_tokens'],
                     tools=self.tools
                 )
                 
@@ -414,17 +417,17 @@ When a user asks you to do something, use the appropriate tools to help them."""
                 # Get next user input
                 user_input = console.input("\n[bold green]You:[/bold green] ").strip()
                 if not user_input or user_input.lower() in ["exit", "quit", "bye"]:
-                    console.print("\n[bold cyan]🐚 Shelly:[/bold cyan] Goodbye! Happy coding!")
+                    console.print(f"\n[bold cyan]🐚 Shelly:[/bold cyan] {CONFIG['prompts']['goodbye_message']}")
                     break
                 
                 messages.append({"role": "user", "content": user_input})
                 
             except KeyboardInterrupt:
-                console.print("\n\n[bold cyan]🐚 Shelly:[/bold cyan] Goodbye! Happy coding!")
+                console.print(f"\n\n[bold cyan]🐚 Shelly:[/bold cyan] {CONFIG['prompts']['goodbye_message']}")
                 break
             except Exception as e:
                 console.print(f"\n[red]❌ Error: {str(e)}[/red]")
-                console.print("Let me try to help you differently...")
+                console.print(CONFIG['prompts']['error_message'])
 
 def main():
     """Main entry point"""
