@@ -141,6 +141,8 @@ You have access to tools to execute shell commands:
 - which: Check if commands are installed (no validation needed)
 - run: Execute shell commands (requires user validation)
 
+Don't hesitate to use the 'run' tool for ANY command beyond ls, pwd, and which. The 'run' tool is your gateway to the full power of the shell - use it liberally for commands like grep, find, cat, echo, mkdir, cp, mv, git, python, npm, or any other shell command the user needs. You're not limited to the basic tools!
+
 For simple tool calls (ls, pwd, which), be extremely concise - just state what you found or what happened. The user can see the command output directly, so don't repeat or explain it unless specifically asked.
 
 Examples of good responses after tool use:
@@ -154,6 +156,25 @@ For the 'run' tool, explain what the commands will do before execution.
 
 When a user asks you to do something, use the appropriate tools to help them."""
     
+    def _truncate_output(self, output: str, max_lines: int = 50, max_chars: int = 4000) -> tuple[str, bool]:
+        """Truncate output if it's too long, return (truncated_output, was_truncated)"""
+        lines = output.split('\n')
+        
+        # Check if we need to truncate by lines
+        if len(lines) > max_lines:
+            truncated_lines = lines[:max_lines//2] + ['', '... (output truncated) ...', ''] + lines[-max_lines//2:]
+            output = '\n'.join(truncated_lines)
+            was_truncated = True
+        else:
+            was_truncated = False
+        
+        # Check if we still need to truncate by characters
+        if len(output) > max_chars:
+            output = output[:max_chars//2] + '\n\n... (output truncated) ...\n\n' + output[-max_chars//2:]
+            was_truncated = True
+        
+        return output, was_truncated
+    
     def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool based on the tool call from Claude"""
         if tool_name == "ls":
@@ -163,20 +184,26 @@ When a user asks you to do something, use the appropriate tools to help them."""
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 
                 # Display command and output in a code block
-                output = f"$ {' '.join(cmd)}\n"
+                console.print()  # Add linebreak before code block
+                display_output = f"$ {' '.join(cmd)}\n"
                 if result.stdout:
-                    output += result.stdout.rstrip()
+                    display_output += result.stdout.rstrip()
                 elif result.returncode == 0:
-                    output += "(no output)"
+                    display_output += "(no output)"
                 else:
-                    output += f"Error: {result.stderr.rstrip()}"
+                    display_output += f"Error: {result.stderr.rstrip()}"
                 
-                syntax = Syntax(output, "bash", theme="monokai", line_numbers=False)
+                syntax = Syntax(display_output, "bash", theme="monokai", line_numbers=False)
                 console.print(syntax)
+                
+                # Truncate output for the API if needed
+                api_output, was_truncated = self._truncate_output(result.stdout)
+                if was_truncated:
+                    api_output = f"[Output was truncated for brevity. Full output shown to user.]\n{api_output}"
                 
                 return {
                     "success": result.returncode == 0,
-                    "output": result.stdout,
+                    "output": api_output,
                     "error": result.stderr
                 }
             except Exception as e:
@@ -190,20 +217,26 @@ When a user asks you to do something, use the appropriate tools to help them."""
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 
                 # Display command and output in a code block
-                output = f"$ {' '.join(cmd)}\n"
+                console.print()  # Add linebreak before code block
+                display_output = f"$ {' '.join(cmd)}\n"
                 if result.stdout:
-                    output += result.stdout.rstrip()
+                    display_output += result.stdout.rstrip()
                 elif result.returncode == 0:
-                    output += "(no output)"
+                    display_output += "(no output)"
                 else:
-                    output += f"Error: {result.stderr.rstrip()}"
+                    display_output += f"Error: {result.stderr.rstrip()}"
                 
-                syntax = Syntax(output, "bash", theme="monokai", line_numbers=False)
+                syntax = Syntax(display_output, "bash", theme="monokai", line_numbers=False)
                 console.print(syntax)
+                
+                # Truncate output for the API if needed
+                api_output, was_truncated = self._truncate_output(result.stdout)
+                if was_truncated:
+                    api_output = f"[Output was truncated for brevity. Full output shown to user.]\n{api_output}"
                 
                 return {
                     "success": result.returncode == 0,
-                    "output": result.stdout,
+                    "output": api_output,
                     "error": result.stderr
                 }
             except Exception as e:
@@ -217,20 +250,26 @@ When a user asks you to do something, use the appropriate tools to help them."""
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 
                 # Display command and output in a code block
-                output = f"$ {' '.join(cmd)}\n"
+                console.print()  # Add linebreak before code block
+                display_output = f"$ {' '.join(cmd)}\n"
                 if result.stdout:
-                    output += result.stdout.rstrip()
+                    display_output += result.stdout.rstrip()
                 elif result.returncode == 0:
-                    output += "(no output)"
+                    display_output += "(no output)"
                 else:
-                    output += f"Error: command not found"
+                    display_output += f"Error: command not found"
                 
-                syntax = Syntax(output, "bash", theme="monokai", line_numbers=False)
+                syntax = Syntax(display_output, "bash", theme="monokai", line_numbers=False)
                 console.print(syntax)
+                
+                # Truncate output for the API if needed
+                api_output, was_truncated = self._truncate_output(result.stdout)
+                if was_truncated:
+                    api_output = f"[Output was truncated for brevity. Full output shown to user.]\n{api_output}"
                 
                 return {
                     "success": result.returncode == 0,
-                    "output": result.stdout,
+                    "output": api_output,
                     "error": result.stderr
                 }
             except Exception as e:
@@ -273,14 +312,19 @@ When a user asks you to do something, use the appropriate tools to help them."""
                     elif result.returncode == 0:
                         cmd_output += "(no output)"
                     
-                    if result.stderr:
+                    if result.stderr and result.returncode != 0:
                         cmd_output += f"\n{result.stderr.rstrip()}"
                     
                     # Display this command's output
                     syntax = Syntax(cmd_output, "bash", theme="monokai", line_numbers=False)
                     console.print(syntax)
                     
-                    all_output.append(result.stdout if result.stdout else "")
+                    # Truncate for API if needed
+                    api_output, was_truncated = self._truncate_output(result.stdout)
+                    if was_truncated:
+                        all_output.append(f"[Output truncated]\n{api_output}")
+                    else:
+                        all_output.append(result.stdout if result.stdout else "")
                     
                     if result.returncode != 0:
                         all_successful = False
@@ -303,7 +347,6 @@ When a user asks you to do something, use the appropriate tools to help them."""
         messages = []
         
         if initial_message:
-            console.print(f"[bold cyan]🐚 Shelly:[/bold cyan] Processing your request: '{initial_message}'")
             messages.append({"role": "user", "content": initial_message})
         else:
             console.print("[bold cyan]🐚 Shelly:[/bold cyan] Hi! I'm Shelly, your terminal assistant. Ask me to help you run any shell commands!")
@@ -330,9 +373,7 @@ When a user asks you to do something, use the appropriate tools to help them."""
                 for content in response.content:
                     if content.type == "text":
                         # Use rich markdown for better formatting
-                        md = Markdown(content.text)
-                        console.print("\n🐚 Shelly:", style="bold cyan")
-                        console.print(md)
+                        console.print(f"\n[bold cyan]🐚 Shelly:[/bold cyan] {content.text}")
                         assistant_content.append({
                             "type": "text",
                             "text": content.text
