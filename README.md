@@ -56,12 +56,3 @@ shelly() {
   deactivate
 }
 ```
-
-## TODO
-
-
-* tweak the prompt (and code) to let the model know the authorisation will be authomaticlaly asked for, no need to do it manually
-* does the model see the history? it does not look like it... there is no `.bash_history` file, but there is a `history` command
-
-
-* refresh readme once all is said and done

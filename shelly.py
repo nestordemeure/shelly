@@ -123,7 +123,9 @@ class Shelly:
         # If no history file or it's empty, try using the history command
         if not commands:
             try:
-                result = subprocess.run(['history', str(max_commands)], 
+                # Use bash -c to ensure we get the builtin history command
+                shell_cmd = f"{self.os_info['shell']} -c 'history {max_commands}'"
+                result = subprocess.run(shell_cmd, 
                                       capture_output=True, text=True, shell=True)
                 if result.returncode == 0 and result.stdout:
                     # Parse history output (typically "NUMBER COMMAND")
@@ -149,24 +151,8 @@ class Shelly:
             with open(prompt_path, 'r') as f:
                 prompt_template = Template(f.read())
         except FileNotFoundError:
-            # Use a default prompt if file not found
-            prompt_template = Template("""You are Shelly, a helpful terminal assistant (running on $os_info with $shell_info shell). Your role is to help users run shell commands effectively.
-
-You have access to two tools:
-
-**run_command**: Execute a single shell command
-- Use for individual commands
-
-**shell_script**: Execute a block of shell script code
-- Use for complex scripts, loops, conditionals, or multi-line operations
-
-When you use these tools, explain what the command or script will do before executing it, especially for non-trivial operations. This helps users understand what will happen.
-
-If a user stops a command or script from running, they'll provide feedback explaining why. Use this feedback to understand their concerns and adjust your approach accordingly.
-
-$history_section
-
-When a user asks you to do something, use the appropriate tools to help them.""")
+            console.print(f"[red]Error: prompt.md not found at {prompt_path}[/red]")
+            raise ValueError("prompt.md file is required")
         
         # Prepare history section
         history_section = ""
