@@ -41,7 +41,7 @@ class Shelly:
         # Initialize Anthropic client
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not found")
+            raise ValueError("ANTHROPIC_API_KEY not found in .env file")
         
         self.client = anthropic.Anthropic(api_key=api_key)
         
@@ -98,6 +98,177 @@ class Shelly:
                 }
             },
             {
+                "name": "grep",
+                "description": "Search for patterns in files. Supports recursive search with -r, case-insensitive with -i, and many other options.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {
+                            "type": "string",
+                            "description": "The pattern to search for"
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Additional arguments like -r, -i, -n, -l, etc.",
+                            "default": []
+                        },
+                        "paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Files or directories to search in",
+                            "default": ["."]
+                        }
+                    },
+                    "required": ["pattern"]
+                }
+            },
+            {
+                "name": "find",
+                "description": "Search for files and directories by name, type, size, or other criteria",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Starting directory for the search",
+                            "default": "."
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Find arguments like -name, -type, -size, etc.",
+                            "default": []
+                        }
+                    }
+                }
+            },
+            {
+                "name": "cat",
+                "description": "Display contents of files",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "files": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Files to display"
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Additional arguments like -n for line numbers",
+                            "default": []
+                        }
+                    },
+                    "required": ["files"]
+                }
+            },
+            {
+                "name": "head",
+                "description": "Display first lines of files (default: 10 lines)",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "files": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Files to display"
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments like -n 20 to show 20 lines",
+                            "default": []
+                        }
+                    },
+                    "required": ["files"]
+                }
+            },
+            {
+                "name": "tail",
+                "description": "Display last lines of files (default: 10 lines)",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "files": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Files to display"
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments like -n 20 or -f for follow",
+                            "default": []
+                        }
+                    },
+                    "required": ["files"]
+                }
+            },
+            {
+                "name": "wc",
+                "description": "Count lines, words, and characters in files",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "files": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Files to count",
+                            "default": []
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments like -l (lines), -w (words), -c (bytes)",
+                            "default": []
+                        }
+                    }
+                }
+            },
+            {
+                "name": "du",
+                "description": "Display disk usage of files and directories",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "paths": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Paths to check",
+                            "default": ["."]
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments like -h (human readable), -s (summary)",
+                            "default": ["-h"]
+                        }
+                    }
+                }
+            },
+            {
+                "name": "tree",
+                "description": "Display directory structure as a tree (if installed)",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Directory to display",
+                            "default": "."
+                        },
+                        "args": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Arguments like -L 2 (depth), -a (all files)",
+                            "default": []
+                        }
+                    }
+                }
+            },
+            {
                 "name": "run",
                 "description": "Execute one or more shell commands sequentially (requires user validation)",
                 "input_schema": {
@@ -115,7 +286,7 @@ class Shelly:
         ]
     
     def _get_command_history(self, max_commands: int) -> List[str]:
-        """Get last max_commands unique commands from shell history"""
+        """Get last nb_commands unique commands from shell history"""
         history_file = Path.home() / ".bash_history"
         if not history_file.exists():
             history_file = Path.home() / ".zsh_history"
@@ -274,6 +445,245 @@ class Shelly:
                 api_output, was_truncated = self._truncate_output(result.stdout)
                 if was_truncated:
                     api_output = f"[Output was truncated for brevity. Full output shown to user.]\n{api_output}"
+                
+                return {
+                    "success": result.returncode == 0,
+                    "output": api_output,
+                    "error": result.stderr
+                }
+            except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
+                return {"success": False, "output": "", "error": str(e)}
+        
+        elif tool_name == "grep":
+            pattern = tool_input.get("pattern", "")
+            args = tool_input.get("args", [])
+            paths = tool_input.get("paths", ["."])
+            cmd = ["grep"] + args + [pattern] + paths
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                # Display command and output
+                console.print()
+                display_output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    display_output += result.stdout.rstrip()
+                elif result.returncode == 0:
+                    display_output += "(no matches found)"
+                elif result.returncode == 1:
+                    display_output += "(no matches found)"
+                else:
+                    display_output += f"Error: {result.stderr.rstrip()}"
+                
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                # Truncate for API
+                api_output, was_truncated = self._truncate_output(result.stdout)
+                if was_truncated:
+                    api_output = f"[Output truncated]\n{api_output}"
+                
+                return {
+                    "success": result.returncode in [0, 1],  # grep returns 1 for no matches
+                    "output": api_output,
+                    "error": result.stderr if result.returncode > 1 else ""
+                }
+            except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
+                return {"success": False, "output": "", "error": str(e)}
+        
+        elif tool_name == "find":
+            path = tool_input.get("path", ".")
+            args = tool_input.get("args", [])
+            cmd = ["find", path] + args
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                console.print()
+                display_output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    display_output += result.stdout.rstrip()
+                elif result.returncode == 0:
+                    display_output += "(no results)"
+                else:
+                    display_output += f"Error: {result.stderr.rstrip()}"
+                
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                api_output, was_truncated = self._truncate_output(result.stdout)
+                if was_truncated:
+                    api_output = f"[Output truncated]\n{api_output}"
+                
+                return {
+                    "success": result.returncode == 0,
+                    "output": api_output,
+                    "error": result.stderr
+                }
+            except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
+                return {"success": False, "output": "", "error": str(e)}
+        
+        elif tool_name == "cat":
+            files = tool_input.get("files", [])
+            args = tool_input.get("args", [])
+            cmd = ["cat"] + args + files
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                console.print()
+                display_output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    display_output += result.stdout.rstrip()
+                elif result.returncode == 0:
+                    display_output += "(empty file)"
+                else:
+                    display_output += f"Error: {result.stderr.rstrip()}"
+                
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                api_output, was_truncated = self._truncate_output(result.stdout)
+                if was_truncated:
+                    api_output = f"[Output truncated]\n{api_output}"
+                
+                return {
+                    "success": result.returncode == 0,
+                    "output": api_output,
+                    "error": result.stderr
+                }
+            except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
+                return {"success": False, "output": "", "error": str(e)}
+        
+        elif tool_name == "head":
+            files = tool_input.get("files", [])
+            args = tool_input.get("args", [])
+            cmd = ["head"] + args + files
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                console.print()
+                display_output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    display_output += result.stdout.rstrip()
+                else:
+                    display_output += f"Error: {result.stderr.rstrip()}"
+                
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                return {
+                    "success": result.returncode == 0,
+                    "output": result.stdout,
+                    "error": result.stderr
+                }
+            except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
+                return {"success": False, "output": "", "error": str(e)}
+        
+        elif tool_name == "tail":
+            files = tool_input.get("files", [])
+            args = tool_input.get("args", [])
+            cmd = ["tail"] + args + files
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                console.print()
+                display_output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    display_output += result.stdout.rstrip()
+                else:
+                    display_output += f"Error: {result.stderr.rstrip()}"
+                
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                return {
+                    "success": result.returncode == 0,
+                    "output": result.stdout,
+                    "error": result.stderr
+                }
+            except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
+                return {"success": False, "output": "", "error": str(e)}
+        
+        elif tool_name == "wc":
+            files = tool_input.get("files", [])
+            args = tool_input.get("args", [])
+            cmd = ["wc"] + args + files
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                console.print()
+                display_output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    display_output += result.stdout.rstrip()
+                else:
+                    display_output += f"Error: {result.stderr.rstrip()}"
+                
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                return {
+                    "success": result.returncode == 0,
+                    "output": result.stdout,
+                    "error": result.stderr
+                }
+            except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
+                return {"success": False, "output": "", "error": str(e)}
+        
+        elif tool_name == "du":
+            paths = tool_input.get("paths", ["."])
+            args = tool_input.get("args", ["-h"])
+            cmd = ["du"] + args + paths
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                console.print()
+                display_output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    display_output += result.stdout.rstrip()
+                else:
+                    display_output += f"Error: {result.stderr.rstrip()}"
+                
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                api_output, was_truncated = self._truncate_output(result.stdout)
+                if was_truncated:
+                    api_output = f"[Output truncated]\n{api_output}"
+                
+                return {
+                    "success": result.returncode == 0,
+                    "output": api_output,
+                    "error": result.stderr
+                }
+            except Exception as e:
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
+                return {"success": False, "output": "", "error": str(e)}
+        
+        elif tool_name == "tree":
+            path = tool_input.get("path", ".")
+            args = tool_input.get("args", [])
+            cmd = ["tree"] + args + [path]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                
+                console.print()
+                display_output = f"$ {' '.join(cmd)}\n"
+                if result.stdout:
+                    display_output += result.stdout.rstrip()
+                else:
+                    display_output += f"Error: {result.stderr.rstrip()}"
+                
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                api_output, was_truncated = self._truncate_output(result.stdout)
+                if was_truncated:
+                    api_output = f"[Output truncated]\n{api_output}"
                 
                 return {
                     "success": result.returncode == 0,
