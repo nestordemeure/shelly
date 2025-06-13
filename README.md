@@ -57,3 +57,11 @@ shelly() {
   deactivate
 }
 ```
+
+## TODO
+
+* no need to display `Restored to original directory: /home/nestor/Downloads/newmann`
+* pass OS / shell type to the system prompt
+* `_handle_command_result`: the model should see the same thing as the human (modulo truncation) to help with debugging
+* does the model see the history? it does not look like it... there is no `.bash_history` file, but there is a `history` command
+* refresh readme once all is said and done

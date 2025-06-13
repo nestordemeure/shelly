@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-"""
-Shelly - An LLM-based terminal assistant powered by Claude Haiku
-"""
-
 import os
 import sys
 import subprocess
@@ -45,6 +40,9 @@ class Shelly:
         
         self.client = anthropic.Anthropic(api_key=api_key)
         
+        # Store original directory to restore on exit
+        self.original_dir = os.getcwd()
+        
         # Get last unique shell commands from history
         self.command_history = self._get_command_history(CONFIG['history']['max_commands'])
         
@@ -53,6 +51,20 @@ class Shelly:
         
         # Define tools for the API
         self.tools = [
+            {
+                "name": "cd",
+                "description": "Change the current working directory",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Directory path to change to (use ~ for home, .. for parent)",
+                            "default": "~"
+                        }
+                    }
+                }
+            },
             {
                 "name": "ls",
                 "description": "List directory contents with any options",
@@ -354,10 +366,122 @@ class Shelly:
         
         return output, was_truncated
     
+    def _get_list_param(self, tool_input: Dict[str, Any], param_name: str, default: List[str] = None) -> List[str]:
+        """Safely get a list parameter from tool input, handling string inputs"""
+        if default is None:
+            default = []
+        
+        value = tool_input.get(param_name, default)
+        
+        # If it's already a list, return it
+        if isinstance(value, list):
+            return [str(item) for item in value]  # Ensure all items are strings
+        
+        # If it's a string, wrap it in a list
+        if isinstance(value, str):
+            return [value]
+        
+        # For any other type, return the default
+        return default
+    
+    def _handle_command_result(self, cmd: List[str], result: subprocess.CompletedProcess, 
+                              success_codes: List[int] = [0], no_output_msg: str = "(no output)") -> Dict[str, Any]:
+        """Handle command result display and API response consistently"""
+        # Display command and output
+        console.print()
+        display_output = f"$ {' '.join(cmd)}\n"
+        
+        if result.stdout:
+            display_output += result.stdout.rstrip()
+        elif result.returncode in success_codes:
+            display_output += no_output_msg
+        else:
+            # For errors, show stderr or a generic error message
+            if result.stderr:
+                display_output += result.stderr.rstrip()
+            else:
+                display_output += f"Error: Command failed with exit code {result.returncode}"
+        
+        syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+        console.print(syntax)
+        
+        # Prepare API response with full error information
+        is_success = result.returncode in success_codes
+        
+        # For API, include both stdout and stderr when there's an error
+        if is_success:
+            api_output, was_truncated = self._truncate_output(result.stdout)
+            if was_truncated:
+                api_output = f"[Output truncated]\n{api_output}"
+            api_error = ""
+        else:
+            # For errors, provide full context to the model
+            api_output = result.stdout if result.stdout else ""
+            api_error = result.stderr if result.stderr else f"Command failed with exit code {result.returncode}"
+            
+            # If both stdout and stderr exist, combine them for context
+            if result.stdout and result.stderr:
+                combined = f"STDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
+                combined_truncated, was_truncated = self._truncate_output(combined)
+                if was_truncated:
+                    api_error = f"[Output truncated]\n{combined_truncated}"
+                else:
+                    api_error = combined
+        
+        return {
+            "success": is_success,
+            "output": api_output,
+            "error": api_error
+        }
+    
     def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a tool based on the tool call from Claude"""
-        if tool_name == "ls":
+        if tool_name == "cd":
+            path = tool_input.get("path", "~")
+            # Expand ~ to home directory
+            path = os.path.expanduser(path)
+            
+            try:
+                # Store current directory before changing
+                old_dir = os.getcwd()
+                
+                # Change directory
+                os.chdir(path)
+                new_dir = os.getcwd()
+                
+                # Display the change
+                console.print()
+                display_output = f"$ cd {tool_input.get('path', '~')}\n"
+                display_output += f"{old_dir} → {new_dir}"
+                
+                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                console.print(syntax)
+                
+                return {
+                    "success": True,
+                    "output": f"Changed directory to {new_dir}",
+                    "error": ""
+                }
+            except FileNotFoundError:
+                console.print()
+                console.print(f"[red]❌ Error: Directory '{path}' not found[/red]")
+                return {"success": False, "output": "", "error": f"Directory not found: {path}"}
+            except PermissionError:
+                console.print()
+                console.print(f"[red]❌ Error: Permission denied for '{path}'[/red]")
+                return {"success": False, "output": "", "error": f"Permission denied: {path}"}
+            except Exception as e:
+                console.print()
+                console.print(f"[red]❌ Error: {str(e)}[/red]")
+                return {"success": False, "output": "", "error": str(e)}
+        
+        elif tool_name == "ls":
             args = tool_input.get("args", [])
+            # Ensure args is a list
+            if isinstance(args, str):
+                args = [args]
+            elif not isinstance(args, list):
+                args = []
             cmd = ["ls"] + args
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
@@ -376,14 +500,14 @@ class Shelly:
                 console.print(syntax)
                 
                 # Truncate output for the API if needed
-                api_output, was_truncated = self._truncate_output(result.stdout)
+                api_output, was_truncated = self._truncate_output(result.stdout if result.returncode == 0 else result.stderr)
                 if was_truncated:
                     api_output = f"[Output was truncated for brevity. Full output shown to user.]\n{api_output}"
                 
                 return {
                     "success": result.returncode == 0,
-                    "output": api_output,
-                    "error": result.stderr
+                    "output": api_output if result.returncode == 0 else "",
+                    "error": result.stderr if result.returncode != 0 else ""
                 }
             except Exception as e:
                 console.print(f"[red]❌ Error: {str(e)}[/red]")
@@ -457,239 +581,90 @@ class Shelly:
         
         elif tool_name == "grep":
             pattern = tool_input.get("pattern", "")
-            args = tool_input.get("args", [])
-            paths = tool_input.get("paths", ["."])
+            args = self._get_list_param(tool_input, "args")
+            paths = self._get_list_param(tool_input, "paths", ["."])
             cmd = ["grep"] + args + [pattern] + paths
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                # Display command and output
-                console.print()
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                elif result.returncode == 0:
-                    display_output += "(no matches found)"
-                elif result.returncode == 1:
-                    display_output += "(no matches found)"
-                else:
-                    display_output += f"Error: {result.stderr.rstrip()}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                # Truncate for API
-                api_output, was_truncated = self._truncate_output(result.stdout)
-                if was_truncated:
-                    api_output = f"[Output truncated]\n{api_output}"
-                
-                return {
-                    "success": result.returncode in [0, 1],  # grep returns 1 for no matches
-                    "output": api_output,
-                    "error": result.stderr if result.returncode > 1 else ""
-                }
+                # grep returns 1 for no matches, which is not an error
+                return self._handle_command_result(cmd, result, success_codes=[0, 1], no_output_msg="(no matches found)")
             except Exception as e:
                 console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
         
         elif tool_name == "find":
             path = tool_input.get("path", ".")
-            args = tool_input.get("args", [])
+            args = self._get_list_param(tool_input, "args")
             cmd = ["find", path] + args
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                console.print()
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                elif result.returncode == 0:
-                    display_output += "(no results)"
-                else:
-                    display_output += f"Error: {result.stderr.rstrip()}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                api_output, was_truncated = self._truncate_output(result.stdout)
-                if was_truncated:
-                    api_output = f"[Output truncated]\n{api_output}"
-                
-                return {
-                    "success": result.returncode == 0,
-                    "output": api_output,
-                    "error": result.stderr
-                }
+                return self._handle_command_result(cmd, result, no_output_msg="(no results)")
             except Exception as e:
                 console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
         
         elif tool_name == "cat":
-            files = tool_input.get("files", [])
-            args = tool_input.get("args", [])
+            files = self._get_list_param(tool_input, "files")
+            args = self._get_list_param(tool_input, "args")
             cmd = ["cat"] + args + files
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                console.print()
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                elif result.returncode == 0:
-                    display_output += "(empty file)"
-                else:
-                    display_output += f"Error: {result.stderr.rstrip()}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                api_output, was_truncated = self._truncate_output(result.stdout)
-                if was_truncated:
-                    api_output = f"[Output truncated]\n{api_output}"
-                
-                return {
-                    "success": result.returncode == 0,
-                    "output": api_output,
-                    "error": result.stderr
-                }
+                return self._handle_command_result(cmd, result, no_output_msg="(empty file)")
             except Exception as e:
                 console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
         
         elif tool_name == "head":
-            files = tool_input.get("files", [])
-            args = tool_input.get("args", [])
+            files = self._get_list_param(tool_input, "files")
+            args = self._get_list_param(tool_input, "args")
             cmd = ["head"] + args + files
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                console.print()
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                else:
-                    display_output += f"Error: {result.stderr.rstrip()}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                return {
-                    "success": result.returncode == 0,
-                    "output": result.stdout,
-                    "error": result.stderr
-                }
+                return self._handle_command_result(cmd, result)
             except Exception as e:
                 console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
         
         elif tool_name == "tail":
-            files = tool_input.get("files", [])
-            args = tool_input.get("args", [])
+            files = self._get_list_param(tool_input, "files")
+            args = self._get_list_param(tool_input, "args")
             cmd = ["tail"] + args + files
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                console.print()
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                else:
-                    display_output += f"Error: {result.stderr.rstrip()}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                return {
-                    "success": result.returncode == 0,
-                    "output": result.stdout,
-                    "error": result.stderr
-                }
+                return self._handle_command_result(cmd, result)
             except Exception as e:
                 console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
         
         elif tool_name == "wc":
-            files = tool_input.get("files", [])
-            args = tool_input.get("args", [])
+            files = self._get_list_param(tool_input, "files")
+            args = self._get_list_param(tool_input, "args")
             cmd = ["wc"] + args + files
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                console.print()
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                else:
-                    display_output += f"Error: {result.stderr.rstrip()}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                return {
-                    "success": result.returncode == 0,
-                    "output": result.stdout,
-                    "error": result.stderr
-                }
+                return self._handle_command_result(cmd, result)
             except Exception as e:
                 console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
         
         elif tool_name == "du":
-            paths = tool_input.get("paths", ["."])
-            args = tool_input.get("args", ["-h"])
+            paths = self._get_list_param(tool_input, "paths", ["."])
+            args = self._get_list_param(tool_input, "args", ["-h"])
             cmd = ["du"] + args + paths
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                console.print()
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                else:
-                    display_output += f"Error: {result.stderr.rstrip()}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                api_output, was_truncated = self._truncate_output(result.stdout)
-                if was_truncated:
-                    api_output = f"[Output truncated]\n{api_output}"
-                
-                return {
-                    "success": result.returncode == 0,
-                    "output": api_output,
-                    "error": result.stderr
-                }
+                return self._handle_command_result(cmd, result)
             except Exception as e:
                 console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
         
         elif tool_name == "tree":
             path = tool_input.get("path", ".")
-            args = tool_input.get("args", [])
+            args = self._get_list_param(tool_input, "args")
             cmd = ["tree"] + args + [path]
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
-                
-                console.print()
-                display_output = f"$ {' '.join(cmd)}\n"
-                if result.stdout:
-                    display_output += result.stdout.rstrip()
-                else:
-                    display_output += f"Error: {result.stderr.rstrip()}"
-                
-                syntax = Syntax(display_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                api_output, was_truncated = self._truncate_output(result.stdout)
-                if was_truncated:
-                    api_output = f"[Output truncated]\n{api_output}"
-                
-                return {
-                    "success": result.returncode == 0,
-                    "output": api_output,
-                    "error": result.stderr
-                }
+                return self._handle_command_result(cmd, result)
             except Exception as e:
                 console.print(f"[red]❌ Error: {str(e)}[/red]")
                 return {"success": False, "output": "", "error": str(e)}
@@ -703,7 +678,11 @@ class Shelly:
             elif not isinstance(commands, list):
                 return {"success": False, "output": "", "error": "Invalid commands format"}
             
+            # Ensure all items in commands are strings
+            commands = [str(cmd) for cmd in commands]
+            
             if not commands:
+                return {"success": False, "output": "", "error": "No commands provided"}
                 return {"success": False, "output": "", "error": "No commands provided"}
             
             # Display commands to be run
@@ -766,6 +745,14 @@ class Shelly:
             }
         
         return {"success": False, "output": "", "error": f"Unknown tool: {tool_name}"}
+    
+    def cleanup(self):
+        """Cleanup method to restore original directory"""
+        try:
+            os.chdir(self.original_dir)
+            console.print(f"\n[dim]Restored to original directory: {self.original_dir}[/dim]")
+        except Exception:
+            pass  # Silently fail if we can't restore
     
     def chat(self, initial_message: Optional[str] = None):
         """Start the chat interaction"""
@@ -840,12 +827,14 @@ class Shelly:
                 user_input = console.input("\n[bold green]You:[/bold green] ").strip()
                 if not user_input or user_input.lower() in ["exit", "quit", "bye"]:
                     console.print(f"\n[bold cyan]🐚 Shelly:[/bold cyan] {CONFIG['prompts']['goodbye_message']}")
+                    self.cleanup()
                     break
                 
                 messages.append({"role": "user", "content": user_input})
                 
             except KeyboardInterrupt:
                 console.print(f"\n\n[bold cyan]🐚 Shelly:[/bold cyan] {CONFIG['prompts']['goodbye_message']}")
+                self.cleanup()
                 break
             except Exception as e:
                 console.print(f"\n[red]❌ Error: {str(e)}[/red]")
@@ -853,6 +842,7 @@ class Shelly:
 
 def main():
     """Main entry point"""
+    shelly = None
     try:
         shelly = Shelly()
         
@@ -870,6 +860,10 @@ def main():
     except Exception as e:
         console.print(f"[red]❌ Unexpected error: {e}[/red]")
         sys.exit(1)
+    finally:
+        # Ensure cleanup happens even on unexpected exit
+        if shelly:
+            shelly.cleanup()
 
 if __name__ == "__main__":
     main()
