@@ -15,6 +15,7 @@
         "theme": "monokai",
         "show_line_numbers": false
     },
+    "validate_all_commands": false,
     "greenlist_commands": [
         "cd",
         "ls",

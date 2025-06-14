@@ -368,7 +368,10 @@ class Shelly:
     def _is_greenlisted(self, command: str) -> bool:
         """Check if a command is in the greenlist (safe to run without confirmation),
         and ensure it doesn't contain any shell operators."""
-        
+        # Check if the user wants to validate each and every command
+        if CONFIG.get('validate_all_commands', False):
+            return False
+
         # Disallow shell operators
         shell_operators = [';', '&&', '||', '|', '>', '<', '&', '$(', '`']
         if any(operator in command for operator in shell_operators):
