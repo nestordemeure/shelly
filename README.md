@@ -41,7 +41,7 @@ shelly() {
   set -a
   [ -f "$SHELLY_DIR/.env" ] && source "$SHELLY_DIR/.env"
   set +a
-  python3 "$SHELLY_DIR/shelly.py" "$@"
+  python3 "$SHELLY_DIR/shelly.py" "$@"  # Add --docs default to auto-load your docs/default.md
   deactivate
 }
 ```
@@ -68,6 +68,16 @@ $ shelly set up a new git repo with a Python .gitignore
 Safe commands (`ls`, `cat`, `grep`, etc.) run automatically. Everything else asks for confirmation first. You can always say no and explain why, and Shelly will adjust.
 
 Edit `config.json` to change the model (defaults to Claude Haiku) or customize which commands run without confirmation.
+
+You can also provide Shelly with custom documentation (defined as markdown files in the in the [docs/](./docs/) directory) about your preferred tools and workflows using the `--docs` flag:
+
+```sh
+# Use specific documentation
+$ shelly --docs ffmpeg convert this video to mp4
+
+# Load multiple documentation files
+$ shelly --docs git,docker,kubernetes set up a containerized app with CI/CD
+```
 
 > ⚠️ **Privacy Note:** Shelly processes your requests, which might include your recent shell history, through Anthropic's API. If privacy is a concern, you will want to use a local model.
 
