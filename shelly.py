@@ -367,7 +367,8 @@ class Shelly:
     
     def _is_greenlisted(self, command: str) -> bool:
         """Check if a command is in the greenlist (safe to run without confirmation),
-        and ensure it doesn't contain any shell operators."""
+        and ensure it doesn't contain any shell operators or suspicious arguments.
+        Note that this piece of code is purposefuly restrictive."""
         # Check if the user wants to validate each and every command
         if CONFIG['validate_all_commands']:
             return False
@@ -377,12 +378,8 @@ class Shelly:
         if any(operator in command for operator in shell_operators):
             return False
         
-        # Disallow flags or arguments that might write/delete/execute
-        disallowed_args = [
-            '-exec', '-ok', '-delete', '-fprint', '-fprint0', '-fprintf',
-            '-printf', '-fls', '-ls', '-set', '-adjust',
-            '-s', '-w', '-a', '-r', '-n', '-c', '-o'
-        ]
+        # Disallow flags or arguments (or parts of those) that might write/delete/execute for some shell commands
+        disallowed_args = ['-exec', '-delete', '-o', '-w', '-f', '-y', '-i', '-a']
         if any(d_arg in command for d_arg in disallowed_args):
             return False
 
