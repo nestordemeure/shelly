@@ -37,33 +37,72 @@ except json.JSONDecodeError as e:
 class PersistentShell:
     """Manages a persistent shell subprocess that maintains state across commands"""
     
-    def __init__(self, shell_path: str):
-        self.shell_path = shell_path
+    def __init__(self, shell_path: Optional[str] = None):
+        self.shell_executable: str = ""
+        self.shell_type: str = ""
         self.process = None
         self.output_queue = queue.Queue()
         self.error_queue = queue.Queue()
         self.output_thread = None
         self.error_thread = None
+
+        if platform.system() == 'Windows':
+            if shell_path and 'powershell' in shell_path.lower():
+                self.shell_executable = 'powershell.exe'
+                self.shell_type = 'powershell'
+            elif shell_path and 'cmd' in shell_path.lower():
+                self.shell_executable = 'cmd.exe'
+                self.shell_type = 'cmd'
+            else:
+                # Try PowerShell by default
+                try:
+                    subprocess.run(['powershell.exe', '-Command', 'exit'], capture_output=True, timeout=5, check=True)
+                    self.shell_executable = 'powershell.exe'
+                    self.shell_type = 'powershell'
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    # Fallback to cmd.exe
+                    self.shell_executable = os.environ.get('COMSPEC', 'cmd.exe')
+                    self.shell_type = 'cmd'
+        else:
+            # Non-Windows
+            self.shell_executable = shell_path if shell_path else os.environ.get('SHELL', '/bin/bash')
+            # Infer shell type from executable name
+            executable_name = os.path.basename(self.shell_executable)
+            if 'powershell' in executable_name.lower() or 'pwsh' in executable_name.lower(): # pwsh is the typical name for PowerShell Core
+                self.shell_type = 'powershell'
+            elif 'cmd' in executable_name.lower(): # Unlikely on non-windows, but for completeness
+                self.shell_type = 'cmd'
+            elif 'bash' in executable_name:
+                self.shell_type = 'bash'
+            elif 'zsh' in executable_name:
+                self.shell_type = 'zsh'
+            elif 'sh' in executable_name:
+                self.shell_type = 'sh'
+            else:
+                self.shell_type = 'bash' # Default for other Unix-like shells
+
         self._start_shell()
     
     def _start_shell(self):
         """Start the shell subprocess"""
-        # Start an interactive shell
+        cmd_list = [self.shell_executable]
+        if self.shell_type not in ['powershell', 'cmd'] and platform.system() != 'Windows':
+            cmd_list.append('-i')
+
         if platform.system() == 'Windows':
-            # Windows: use cmd.exe or powershell
             self.process = subprocess.Popen(
-                [self.shell_path],
+                cmd_list,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                bufsize=0,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if platform.system() == 'Windows' else 0
+                bufsize=0, # Unbuffered
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
             )
         else:
-            # Unix-like: use the specified shell in interactive mode
+            # Unix-like
             self.process = subprocess.Popen(
-                [self.shell_path, '-i'],
+                cmd_list,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -161,7 +200,14 @@ class PersistentShell:
         
         # Send command with a unique marker to detect completion
         marker = f"SHELLY_MARKER_{time.time()}"
-        full_command = f"{command}\necho {marker} $?\n"
+
+        if self.shell_type == 'cmd':
+            full_command = f"{command}\necho {marker} %ERRORLEVEL%\n"
+        elif self.shell_type == 'powershell':
+            # Ensure $LASTEXITCODE is captured correctly.
+            full_command = f"{command}; $LastExitCodeFromCmd = $LASTEXITCODE; echo \"{marker} $LastExitCodeFromCmd\"\n"
+        else: # bash, zsh, sh, etc.
+            full_command = f"{command}\necho {marker} $?\n"
         
         try:
             self.process.stdin.write(full_command)
@@ -190,10 +236,22 @@ class PersistentShell:
                 stdout_lines.append(parts[0])
                 # Extract return code
                 marker_line = parts[1].strip().split('\n')[0]
+                code_str = marker_line.strip()
+
+                if self.shell_type == 'powershell':
+                    # PowerShell's echo might add quotes sometimes, e.g., echo "marker 0"
+                    if code_str.startswith('"') and code_str.endswith('"'):
+                        code_str = code_str[1:-1].strip()
+                    # $LASTEXITCODE could be non-integer if a PS command itself fails to set it (e.g. bad cmdlet)
+                    # Or if $LastExitCodeFromCmd was not set because command was invalid before it.
+                    # We are primarily interested in the exit code of the command itself.
+
                 try:
-                    return_code = int(marker_line.strip())
+                    return_code = int(code_str)
                 except (ValueError, IndexError):
-                    return_code = 0
+                    # If marker was found but code is not an int, it implies an issue.
+                    # Default to 1 to indicate an error.
+                    return_code = 1
                 marker_found = True
             else:
                 stdout_lines.append(stdout_part)
@@ -243,9 +301,28 @@ class Shelly:
         self.shell = PersistentShell(shell_path)
         
         # Get current working directory from the shell
-        stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
-        self.current_dir = stdout.strip()
-        
+        pwd_command = "pwd"
+        if self.shell.shell_type == 'cmd':
+            pwd_command = "cd"
+        elif self.shell.shell_type == 'powershell':
+            pwd_command = "echo (Get-Location).Path"
+
+        stdout, _, _ = self.shell.run_command(pwd_command)
+        # For 'cd' in CMD, stdout might contain more than just the path.
+        # For 'echo (Get-Location).Path' in PowerShell, stdout is just the path.
+        # For 'pwd', stdout is just the path.
+        if self.shell.shell_type == 'cmd':
+             # 'cd' with no arguments prints the current directory.
+             # If 'cd' is used to change directory, e.g. 'cd C:\Users', it doesn't print anything.
+             # However, run_command appends an echo marker.
+             # A simple 'cd' will have its output (the path) before the marker.
+             # We need to be careful if the command itself was 'cd C:\newpath'
+             # The current implementation of run_command should handle this by capturing output before marker.
+             # For now, assume stdout.strip() is okay.
+             self.current_dir = stdout.strip().split('\n')[-1] # Get the last line if 'cd' outputs more
+        else:
+            self.current_dir = stdout.strip()
+
         # Get last unique shell commands from history
         self.command_history = self._get_command_history(CONFIG['history']['max_commands'])
         
@@ -286,57 +363,116 @@ class Shelly:
     
     def _get_system_info(self) -> Dict[str, str]:
         """Get OS and shell information"""
-        shell = os.environ.get('SHELL', 'unknown')
-        if shell == 'unknown' and platform.system() == 'Windows':
-            shell = os.environ.get('COMSPEC', 'cmd.exe')
-        
         return {
             "os": f"{platform.system()} {platform.release()}",
-            "shell": os.path.basename(shell)
+            "shell": self.shell.shell_type if hasattr(self, 'shell') else "unknown"
         }
     
     def _get_command_history(self, max_commands: int) -> List[str]:
-        """Get last nb_commands unique commands from shell history"""
-        history_file = Path.home() / ".bash_history"
-        if not history_file.exists():
-            history_file = Path.home() / ".zsh_history"
-        
+        """Get last nb_commands unique commands from shell history, adapting to the current shell."""
         commands = []
-        if history_file.exists():
-            try:
-                with open(history_file, 'r', errors='ignore') as f:
-                    lines = f.readlines()
-                    # Get unique commands
-                    seen = set()
-                    for line in reversed(lines):
-                        cmd = line.strip()
-                        if cmd and cmd not in seen:
-                            seen.add(cmd)
-                            commands.append(cmd)
-                            if len(commands) >= max_commands:
-                                break
-                    commands.reverse()
-            except Exception:
-                pass
-        
-        # If no history file or it's empty, try using the history command
+        seen = set()
+
+        # Helper to process lines into unique commands
+        def process_lines(lines: List[str], reverse_order: bool = True):
+            processed_commands = []
+            # If reverse_order is True, we iterate from newest to oldest.
+            # Otherwise, assume lines are already in chronological order.
+            iterable = reversed(lines) if reverse_order else lines
+            for line in iterable:
+                cmd = line.strip()
+                if cmd and cmd not in seen:
+                    seen.add(cmd)
+                    processed_commands.append(cmd)
+                    if len(processed_commands) >= max_commands:
+                        break
+            # If we processed in reverse (newest first), reverse back to chronological.
+            if reverse_order:
+                processed_commands.reverse()
+            return processed_commands
+
+        # 1. Prioritize Shell-Specific Session History for Windows
+        if platform.system() == 'Windows':
+            history_cmd = None
+            if self.shell.shell_type == 'powershell':
+                history_cmd = f"Get-History -Count {max_commands} | ForEach-Object {{ $_.CommandLine }}"
+            elif self.shell.shell_type == 'cmd':
+                history_cmd = "doskey /history"
+
+            if history_cmd:
+                try:
+                    stdout, _, returncode = self.shell.run_command(history_cmd)
+                    if returncode == 0 and stdout:
+                        # PowerShell Get-History is newest first, doskey /history is oldest first.
+                        # ForEach-Object preserves order of Get-History.
+                        # doskey /history output is already chronological.
+                        lines = stdout.strip().split('\n')
+                        # For PowerShell, Get-History is newest first, so process lines in given order and then reverse.
+                        # For CMD, doskey /history is oldest first, so process lines in given order (no reverse needed at the end).
+                        if self.shell.shell_type == 'powershell':
+                             # Get-History returns newest first. We want to keep the newest unique ones.
+                            temp_commands = []
+                            temp_seen_for_ps = set()
+                            for line in lines: # Iterating from newest to oldest
+                                cmd = line.strip()
+                                if cmd and cmd not in temp_seen_for_ps:
+                                    temp_seen_for_ps.add(cmd)
+                                    temp_commands.append(cmd)
+                                    if len(temp_commands) >= max_commands:
+                                        break
+                            temp_commands.reverse() # Back to chronological
+                            commands = temp_commands
+                            seen.update(temp_seen_for_ps)
+
+                        elif self.shell.shell_type == 'cmd':
+                            # doskey /history is oldest first.
+                            commands = process_lines(lines, reverse_order=False) # Process in given order
+
+                        if commands:
+                            return commands
+                except Exception:
+                    pass # Fall through to other methods if shell command fails
+
+        # 2. Fallback to File-Based History (Primarily for Unix-like systems, or if Windows failed)
+        if not commands:
+            history_files = []
+            if platform.system() != 'Windows': # Only try file-based on non-Windows by default
+                history_files = [Path.home() / ".bash_history", Path.home() / ".zsh_history"]
+
+            for history_file_path in history_files:
+                if history_file_path.exists():
+                    try:
+                        with open(history_file_path, 'r', errors='ignore') as f:
+                            lines = f.readlines()
+                        # File history is typically oldest first, but some shells might write newest first.
+                        # Standard approach is to read all, then get unique from reversed (newest)
+                        commands = process_lines(lines, reverse_order=True)
+                        if commands:
+                            return commands
+                    except Exception:
+                        pass
+
+        # 3. Fallback to Generic `history` Command (via Persistent Shell)
         if not commands:
             try:
-                # Use the persistent shell to get history
+                # This is a generic attempt, might work on some Unix shells if files weren't found/readable.
+                # It might not work or give poor output on Windows shells if not already handled.
                 stdout, _, returncode = self.shell.run_command(f'history {max_commands}')
                 if returncode == 0 and stdout:
-                    # Parse history output (typically "NUMBER COMMAND")
-                    seen = set()
-                    for line in stdout.strip().split('\n'):
-                        # Remove leading number and whitespace
+                    lines = stdout.strip().split('\n')
+                    parsed_history_lines = []
+                    for line in lines:
+                        # Typical output: "  1  command" or "command"
                         parts = line.strip().split(maxsplit=1)
-                        if len(parts) > 1:
-                            cmd = parts[1]
-                            if cmd and cmd not in seen:
-                                seen.add(cmd)
-                                commands.append(cmd)
+                        cmd_part = parts[-1] # Take the last part, which should be the command
+                        parsed_history_lines.append(cmd_part)
+
+                    # `history` command usually lists oldest first.
+                    commands = process_lines(parsed_history_lines, reverse_order=False)
+                    if commands:
+                        return commands
             except Exception:
-                pass
+                pass # Final fallback will be an empty list
         
         return commands
     
@@ -368,27 +504,82 @@ class Shelly:
     def _is_greenlisted(self, command: str) -> bool:
         """Check if a command is in the greenlist (safe to run without confirmation),
         and ensure it doesn't contain any shell operators."""
-        # Check if the user wants to validate each and every command
+        # 1. Check global validation flag
         if CONFIG.get('validate_all_commands', False):
             return False
 
-        # Disallow shell operators
+        # 2. Disallow shell operators for all commands that are not greenlisted
+        # (even if they might be part of a greenlisted command like `doskey /history` later)
+        # This check is primarily for the overall command string.
+        # The base_command check later will handle specific greenlisted commands.
         shell_operators = [';', '&&', '||', '|', '>', '<', '&', '$(', '`']
-        if any(operator in command for operator in shell_operators):
-            return False
+        # A more nuanced check for operators might be needed if greenlisted commands themselves
+        # legitimately contain them (e.g. a script). For now, this is a general safety measure.
+        # We will check the *base_command* against the greenlist.
+        # If the command string itself contains operators, but the base_command is greenlisted
+        # (e.g. "echo hello > file.txt"), this will currently be blocked.
+        # This is a stricter interpretation for safety.
+        # If a greenlisted command *needs* an operator (e.g. `doskey /history` is fine, but `echo hi;ls` is not)
+        # this logic might need refinement. For now, `doskey /history` is a single "command" for `split()`.
+
+        # We will check for operators *after* extracting the base command and arguments
+        # to allow greenlisted commands like "doskey /history".
         
         # Get the base command (first word)
-        base_command = command.strip().split()[0] if command.strip() else ""
-        
-        # Get greenlist from config, default to read-only commands
-        greenlist = CONFIG.get('greenlist_commands', [
-            'ls', 'pwd', 'which', 'grep', 'find', 'cat', 'head', 'tail',
-            'wc', 'du', 'tree', 'echo', 'date', 'whoami', 'hostname',
-            'uname', 'id', 'groups', 'env', 'printenv', 'type', 'file',
-            'stat', 'readlink', 'basename', 'dirname', 'realpath'
-        ])
-        
-        return base_command in greenlist
+        command_parts = command.strip().split()
+        base_command = command_parts[0] if command_parts else ""
+        full_command_for_operator_check = command.strip()
+
+        # Check for operators in the full command string, unless the command *itself* is greenlisted
+        # and might contain something like a slash (e.g. "doskey /history").
+        # The key is that the *entire matched greenlist entry* is what's safe.
+
+        # Determine the key for greenlist lookup
+        current_os = platform.system()
+        shell_type = self.shell.shell_type
+        key = 'default' # Default key
+
+        if shell_type == 'powershell':
+            key = 'windows_powershell'
+        elif shell_type == 'cmd':
+            key = 'windows_cmd'
+        elif current_os == 'Linux':
+            key = 'linux'
+        elif current_os == 'Darwin': # macOS
+            key = 'macos'
+
+        all_greenlist_configs = CONFIG.get('greenlist_commands', {})
+        greenlist = list(all_greenlist_configs.get(key, [])) # Make a mutable copy
+
+        # Extend with default list if the key is not 'default' itself
+        if key != 'default':
+            default_greenlist = all_greenlist_configs.get('default', [])
+            for item in default_greenlist:
+                if item not in greenlist:
+                    greenlist.append(item)
+
+        # Now check if the command matches any greenlisted entry.
+        # Some greenlisted commands can have spaces (e.g. "doskey /history").
+        # So we check against the full command string for multi-word greenlisted items,
+        # and against the base_command for single-word greenlisted items.
+
+        is_safe = False
+        for green_item in greenlist:
+            if " " in green_item: # Multi-word greenlisted command
+                if full_command_for_operator_check.startswith(green_item):
+                    # Check if the rest of the command after the greenlisted part contains operators
+                    remaining_command = full_command_for_operator_check[len(green_item):].strip()
+                    if not any(op in remaining_command for op in shell_operators):
+                        is_safe = True
+                        break
+            else: # Single-word greenlisted command
+                if base_command == green_item:
+                    # Check if arguments contain shell operators
+                    args_part = command.strip()[len(base_command):].strip()
+                    if not any(op in args_part for op in shell_operators):
+                        is_safe = True
+                        break
+        return is_safe
     
     def _truncate_output(self, output: str) -> tuple[str, bool]:
         """Truncate output if it's too long, return (truncated_output, was_truncated)"""
@@ -445,7 +636,12 @@ class Shelly:
             if needs_validation:
                 # Display command to be run
                 console.print("\n[bold]Command to execute:[/bold]")
-                syntax = Syntax(command, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                lexer = "bash" # Default lexer
+                if self.shell.shell_type == 'powershell':
+                    lexer = 'powershell'
+                elif self.shell.shell_type == 'cmd':
+                    lexer = 'batch' # 'batch' is typical for cmd.exe syntax
+                syntax = Syntax(command, lexer, theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
                 console.print(syntax)
                 
                 response = console.input("\n[yellow]Run this command? (yes/no): [/yellow]").strip().lower()
@@ -462,9 +658,29 @@ class Shelly:
                 stdout, stderr, returncode = self.shell.run_command(command)
                 
                 # Update current directory if command was cd
-                if command.strip().startswith('cd'):
-                    new_stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
-                    self.current_dir = new_stdout.strip()
+                if command.strip().startswith('cd '): # Ensure it's 'cd' and not 'cde' or similar
+                    # After a 'cd' command, query the new current directory
+                    pwd_cmd = "pwd"
+                    if self.shell.shell_type == 'cmd':
+                        pwd_cmd = "cd"
+                    elif self.shell.shell_type == 'powershell':
+                        pwd_cmd = "echo (Get-Location).Path"
+
+                    # Use a temporary, fresh call to run_command to get the new CWD
+                    # This avoids issues with the current command's output processing.
+                    # We need to be careful here to avoid recursion if run_command itself calls _execute_tool
+                    # However, this is _execute_tool calling run_command, which is fine.
+
+                    # To prevent infinite recursion if pwd_cmd itself is 'cd',
+                    # we directly use the shell's method.
+                    new_stdout, _, _ = self.shell.run_command(pwd_cmd) # This is fine.
+
+                    if self.shell.shell_type == 'cmd':
+                        # 'cd' command output is just the path.
+                        self.current_dir = new_stdout.strip().split('\n')[-1]
+                    else:
+                        # 'pwd' and 'echo (Get-Location).Path' output is just the path.
+                        self.current_dir = new_stdout.strip()
                 
                 # Format output for both display and API
                 formatted_output = self._format_command_output(command, stdout, stderr, returncode)
@@ -474,7 +690,14 @@ class Shelly:
                 
                 # Display to user
                 console.print()
-                syntax = Syntax(truncated_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                output_lexer = "bash" # Default lexer for output
+                if self.shell.shell_type == 'powershell':
+                    output_lexer = 'powershell'
+                elif self.shell.shell_type == 'cmd':
+                    output_lexer = 'batch'
+                # Using shell-specific lexer for output. This might be too aggressive if output is not shell code.
+                # However, often the output can contain command-like structures or be more readable with it.
+                syntax = Syntax(truncated_output, output_lexer, theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
                 console.print(syntax)
                 
                 # Return same output to API (what user sees is what model gets)
@@ -495,7 +718,12 @@ class Shelly:
             
             # Always require validation for shell scripts
             console.print("\n[bold]Shell script to execute:[/bold]")
-            syntax = Syntax(script, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+            script_lexer = "bash" # Default lexer
+            if self.shell.shell_type == 'powershell':
+                script_lexer = 'powershell'
+            elif self.shell.shell_type == 'cmd':
+                script_lexer = 'batch'
+            syntax = Syntax(script, script_lexer, theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
             console.print(syntax)
             
             response = console.input("\n[yellow]Run this script? (yes/no): [/yellow]").strip().lower()
@@ -526,9 +754,19 @@ class Shelly:
                         last_returncode = returncode
                         
                         # Update current directory if command was cd
-                        if line.startswith('cd'):
-                            new_stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
-                            self.current_dir = new_stdout.strip()
+                        if line.startswith('cd '): # Ensure it's 'cd' and not 'cde'
+                            pwd_cmd = "pwd"
+                            if self.shell.shell_type == 'cmd':
+                                pwd_cmd = "cd"
+                            elif self.shell.shell_type == 'powershell':
+                                pwd_cmd = "echo (Get-Location).Path"
+
+                            new_stdout, _, _ = self.shell.run_command(pwd_cmd)
+
+                            if self.shell.shell_type == 'cmd':
+                                self.current_dir = new_stdout.strip().split('\n')[-1]
+                            else:
+                                self.current_dir = new_stdout.strip()
                 
                 # Format output for both display and API
                 combined_stdout = '\n'.join(all_stdout)
@@ -540,7 +778,12 @@ class Shelly:
                 
                 # Display to user
                 console.print()
-                syntax = Syntax(truncated_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+                output_lexer_script = "bash" # Default lexer for script output
+                if self.shell.shell_type == 'powershell':
+                    output_lexer_script = 'powershell'
+                elif self.shell.shell_type == 'cmd':
+                    output_lexer_script = 'batch'
+                syntax = Syntax(truncated_output, output_lexer_script, theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
                 console.print(syntax)
                 
                 # Return same output to API
