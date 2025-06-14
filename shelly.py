@@ -508,33 +508,19 @@ class Shelly:
                     "error": f"User declined to run script: {reason}"
                 }
             
-            # Execute the script line by line using persistent shell
+            # Execute the entire script as a single command
             try:
-                # Split script into lines and execute each
-                lines = script.strip().split('\n')
-                all_stdout = []
-                all_stderr = []
-                last_returncode = 0
+                # For multi-line scripts, we need to pass them as a single command
+                # This preserves shell constructs like loops, conditionals, etc.
+                stdout, stderr, returncode = self.shell.run_command(script)
                 
-                for line in lines:
-                    line = line.strip()
-                    if line and not line.startswith('#'):  # Skip empty lines and comments
-                        stdout, stderr, returncode = self.shell.run_command(line)
-                        if stdout:
-                            all_stdout.append(stdout)
-                        if stderr:
-                            all_stderr.append(stderr)
-                        last_returncode = returncode
-                        
-                        # Update current directory if command was cd
-                        if line.startswith('cd'):
-                            new_stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
-                            self.current_dir = new_stdout.strip()
+                # Check if script changed directory
+                if 'cd ' in script:
+                    new_stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
+                    self.current_dir = new_stdout.strip()
                 
                 # Format output for both display and API
-                combined_stdout = '\n'.join(all_stdout)
-                combined_stderr = '\n'.join(all_stderr)
-                formatted_output = self._format_command_output("(shell script)", combined_stdout, combined_stderr, last_returncode)
+                formatted_output = self._format_command_output("(shell script)", stdout, stderr, returncode)
                 
                 # Truncate if needed
                 truncated_output, was_truncated = self._truncate_output(formatted_output)
@@ -546,7 +532,7 @@ class Shelly:
                 
                 # Return same output to API
                 return {
-                    "success": last_returncode == 0,
+                    "success": returncode == 0,
                     "output": truncated_output,
                     "error": ""
                 }

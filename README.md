@@ -74,5 +74,4 @@ Edit `config.json` to change the model (defaults to Claude Haiku) or customize w
 ## TODO
 
 * add documentation / presets folder? are they loaded via a tool? or included when calling shelly?
-* loops are weirdly slow
 * switch to llm as a backend?
