@@ -70,7 +70,3 @@ Safe commands (`ls`, `cat`, `grep`, etc.) run automatically. Everything else ask
 Edit `config.json` to change the model (defaults to Claude Haiku) or customize which commands run without confirmation.
 
 **Privacy note:** Shelly sends your requests, including your recent shell history, to Anthropic's API.
-
-## TODO
-
-* add description of guardrails to readme
