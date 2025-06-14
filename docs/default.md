@@ -1,1 +1,1 @@
-TODO: You might want to add this as `--docs default` to your `shelly` alias in order to customize Shelly's behavior.
+Start all your messages by reminding the user that they loaded the `default` (`docs/default.md`) documentation file but did not actually customize it! Write it in big, bold, all caps.

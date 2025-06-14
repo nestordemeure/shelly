@@ -15,6 +15,7 @@ import signal
 import threading
 import queue
 import time
+import argparse
 
 # Load environment variables
 load_dotenv()
@@ -225,7 +226,7 @@ class PersistentShell:
 class Shelly:
     """Main Shelly assistant class"""
     
-    def __init__(self):
+    def __init__(self, docs: Optional[List[str]] = None):
         # Initialize Anthropic client
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
@@ -248,6 +249,9 @@ class Shelly:
         
         # Get last unique shell commands from history
         self.command_history = self._get_command_history(CONFIG['history']['max_commands'])
+        
+        # Load documentation files if specified
+        self.custom_docs = self._load_documentation(docs) if docs else ""
         
         # Define system prompt
         self.system_prompt = self._create_system_prompt()
@@ -283,6 +287,33 @@ class Shelly:
                 }
             }
         ]
+    
+    def _load_documentation(self, doc_names: List[str]) -> str:
+        """Load documentation files from the docs directory"""
+        docs_dir = Path(__file__).parent / "docs"
+        loaded_docs = []
+        
+        for doc_name in doc_names:
+            # Remove .md extension if provided
+            if doc_name.endswith('.md'):
+                doc_name = doc_name[:-3]
+            
+            doc_path = docs_dir / f"{doc_name}.md"
+            
+            if doc_path.exists():
+                try:
+                    with open(doc_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        loaded_docs.append(f"\n\n## Documentation: {doc_name}\n\n{content}")
+                        console.print(f"[green]✓ Loaded documentation: {doc_name}[/green]")
+                except Exception as e:
+                    console.print(f"[yellow]⚠ Warning: Could not load {doc_path}: {e}[/yellow]")
+            else:
+                console.print(f"[yellow]⚠ Warning: Documentation file not found: {doc_path}[/yellow]")
+        
+        if loaded_docs:
+            return "\n\n---\n\n# Custom Documentation\n" + "".join(loaded_docs)
+        return ""
     
     def _get_system_info(self) -> Dict[str, str]:
         """Get OS and shell information"""
@@ -359,11 +390,17 @@ class Shelly:
             history_section += "\n".join(f"- {cmd}" for cmd in self.command_history[-display_count:])
         
         # Substitute variables in the template
-        return prompt_template.substitute(
+        prompt = prompt_template.substitute(
             os_info=self.os_info["os"],
             shell_info=self.os_info["shell"],
             history_section=history_section
         )
+        
+        # Append custom documentation if loaded
+        if self.custom_docs:
+            prompt += self.custom_docs
+        
+        return prompt
     
     def _is_greenlisted(self, command: str) -> bool:
         """Check if a command is in the greenlist (safe to run without confirmation),
@@ -634,15 +671,48 @@ class Shelly:
                 console.print(f"\n[red]❌ Error: {str(e)}[/red]")
                 console.print(CONFIG['prompts']['error_message'])
 
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="Shelly - A smart terminal assistant that translates natural language into shell commands",
+        epilog="Example usage:\n"
+               "  shelly                                      # Start interactive mode\n"
+               "  shelly find all python files                # Natural language request\n"
+               "  shelly show me the largest files here       # Another request\n"
+               "  shelly --docs git,docker deploy my app      # Use multiple user-provided docs",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    parser.add_argument(
+        '-d', '--docs',
+        type=str,
+        help='Comma-separated list of documentation files (e.g., git,docker,ffmpeg) to load from the /docs folder'
+    )
+    
+    parser.add_argument(
+        'request',
+        nargs='*',
+        help='Natural language request describing what you want to do (if not provided, starts interactive mode)'
+    )
+    
+    return parser.parse_args()
+
 def main():
     """Main entry point"""
+    args = parse_arguments()
+    
+    # Parse docs if provided
+    docs = None
+    if args.docs:
+        docs = [doc.strip() for doc in args.docs.split(',') if doc.strip()]
+    
     shelly = None
     try:
-        shelly = Shelly()
+        shelly = Shelly(docs=docs)
         
-        # Check if called with arguments
-        if len(sys.argv) > 1:
-            initial_message = " ".join(sys.argv[1:])
+        # Check if called with request arguments
+        if args.request:
+            initial_message = " ".join(args.request)
             shelly.chat(initial_message)
         else:
             shelly.chat()

@@ -69,7 +69,7 @@ Safe commands (`ls`, `cat`, `grep`, etc.) run automatically. Everything else ask
 
 Edit `config.json` to change the model (defaults to Claude Haiku) or customize which commands run without confirmation.
 
-You can also provide Shelly with custom documentation (defined as markdown files in the in the [docs/](./docs/) directory) about your preferred tools and workflows using the `--docs` flag:
+You can also provide Shelly with custom documentation (defined as markdown files in the in the [docs/](./docs/) directory) about your preferred tools and workflows using the `--docs` (or `-d`) flag:
 
 ```sh
 # Use specific documentation
@@ -83,5 +83,4 @@ $ shelly --docs git,docker,kubernetes set up a containerized app with CI/CD
 
 ## TODO
 
-* add documentation / presets folder? are they loaded via a tool? or included when calling shelly?
-* switch to llm as a backend?
+* Switch to [llm](https://llm.datasette.io/en/latest/python-api.html) as a backend to open the door to other APIs / local models?

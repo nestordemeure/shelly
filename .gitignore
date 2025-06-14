@@ -1,5 +1,6 @@
-# python env
+# Shelly specific
 shelly-env/
+docs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
