@@ -369,7 +369,7 @@ class Shelly:
         """Check if a command is in the greenlist (safe to run without confirmation),
         and ensure it doesn't contain any shell operators."""
         # Check if the user wants to validate each and every command
-        if CONFIG.get('validate_all_commands', False):
+        if CONFIG['validate_all_commands']:
             return False
 
         # Disallow shell operators
@@ -381,12 +381,7 @@ class Shelly:
         base_command = command.strip().split()[0] if command.strip() else ""
         
         # Get greenlist from config, default to read-only commands
-        greenlist = CONFIG.get('greenlist_commands', [
-            'ls', 'pwd', 'which', 'grep', 'find', 'cat', 'head', 'tail',
-            'wc', 'du', 'tree', 'echo', 'date', 'whoami', 'hostname',
-            'uname', 'id', 'groups', 'env', 'printenv', 'type', 'file',
-            'stat', 'readlink', 'basename', 'dirname', 'realpath'
-        ])
+        greenlist = CONFIG['greenlist_commands']
         
         return base_command in greenlist
     
