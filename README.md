@@ -69,10 +69,10 @@ Safe commands (`ls`, `cat`, `grep`, etc.) run automatically. Everything else ask
 
 Edit `config.json` to change the model (defaults to Claude Haiku) or customize which commands run without confirmation.
 
-**Privacy note:** Shelly sends your requests, including your recent shell history, to Anthropic's API.
+> ⚠️ **Privacy Note:** Shelly processes your requests, which might include your recent shell history, through Anthropic's API. If privacy is a concern, you will want to use a local model.
 
 ## TODO
 
-* improve legibility of privacy note
 * add documentation / presets folder? are they loaded via a tool? or included when calling shelly?
+* loops are weirdly slow
 * switch to llm as a backend?
