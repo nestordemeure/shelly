@@ -20,9 +20,10 @@
         "cd",
         "ls",
         "pwd",
+        "find",
+        "tree",
         "which",
         "grep",
-        "find",
         "cat",
         "head",
         "tail",
@@ -30,7 +31,6 @@
         "du",
         "tree",
         "echo",
-        "date",
         "whoami",
         "hostname",
         "uname",
@@ -51,8 +51,7 @@
         "uptime",
         "w",
         "who",
-        "last",
-        "history"
+        "last"
     ],
     "prompts": {
         "welcome_message": "Hi! I'm Shelly, your terminal assistant. Ask me to help you run any shell commands!",

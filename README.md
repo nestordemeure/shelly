@@ -74,6 +74,5 @@ Edit `config.json` to change the model (defaults to Claude Haiku) or customize w
 ## TODO
 
 * improve legibility of privacy note
-* add protection against -exec and find
 * add documentation / presets folder? are they loaded via a tool? or included when calling shelly?
 * switch to llm as a backend?

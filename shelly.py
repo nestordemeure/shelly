@@ -377,6 +377,15 @@ class Shelly:
         if any(operator in command for operator in shell_operators):
             return False
         
+        # Disallow flags or arguments that might write/delete/execute
+        disallowed_args = [
+            '-exec', '-ok', '-delete', '-fprint', '-fprint0', '-fprintf',
+            '-printf', '-fls', '-ls', '-set', '-adjust',
+            '-s', '-w', '-a', '-r', '-n', '-c', '-o'
+        ]
+        if any(d_arg in command for d_arg in disallowed_args):
+            return False
+
         # Get the base command (first word)
         base_command = command.strip().split()[0] if command.strip() else ""
         
