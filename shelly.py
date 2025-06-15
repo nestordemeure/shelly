@@ -5,7 +5,7 @@ import json
 import platform
 from typing import List, Dict, Any, Optional, Union
 from pathlib import Path
-import anthropic
+import llm
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.markdown import Markdown
@@ -227,12 +227,15 @@ class Shelly:
     """Main Shelly assistant class"""
     
     def __init__(self, docs: Optional[List[str]] = None):
-        # Initialize Anthropic client
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not found in .env file")
+        # Get model from config or use default
+        model_name = CONFIG['model']['name']
         
-        self.client = anthropic.Anthropic(api_key=api_key)
+        # Try to get the model
+        try:
+            self.model = llm.get_model(model_name)
+        except llm.UnknownModelError:
+            console.print(f"[yellow]Warning: Model '{model_name}' not found. Using default model.[/yellow]")
+            self.model = llm.get_model()
         
         # Get system info
         self.os_info = self._get_system_info()
@@ -243,12 +246,8 @@ class Shelly:
             shell_path = os.environ.get('COMSPEC', 'cmd.exe')
         self.shell = PersistentShell(shell_path)
         
-        # Get current working directory from the shell
-        stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
-        self.current_dir = stdout.strip()
-        
         # Get last unique shell commands from history
-        self.command_history = self._get_command_history(CONFIG['history']['max_commands'])
+        self.command_history = self._get_command_history(CONFIG['shell_history_size'])
         
         # Load documentation files if specified
         self.custom_docs = self._load_documentation(docs) if docs else ""
@@ -257,36 +256,91 @@ class Shelly:
         self.system_prompt = self._create_system_prompt()
         
         # Define tools for the API
-        self.tools = [
-            {
-                "name": "run_command",
-                "description": "Execute a single shell command. Use this for individual commands rather than complex shell scripts.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "command": {
-                            "type": "string",
-                            "description": "The shell command to execute"
-                        }
-                    },
-                    "required": ["command"]
-                }
-            },
-            {
-                "name": "shell_script",
-                "description": "Execute a block of shell script code. Use this for multi-line scripts, complex command sequences with conditionals/loops, or when you need shell-specific features like pipes, redirections, or environment variable manipulation.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "script": {
-                            "type": "string",
-                            "description": "The shell script code to execute"
-                        }
-                    },
-                    "required": ["script"]
-                }
-            }
-        ]
+        self.tools = [self.run_command, self.shell_script]
+    
+    def run_command(self, command: str) -> str:
+        """Execute a single shell command. Use this for individual commands rather than complex shell scripts."""
+        if not command.strip():
+            return "Error: No command provided"
+        
+        # Check if command needs validation
+        needs_validation = not self._is_greenlisted(command)
+        
+        if needs_validation:
+            # Display command to be run
+            console.print("\n[bold]Command to execute:[/bold]")
+            syntax = Syntax(command, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+            console.print(syntax)
+            
+            response = console.input("\n[yellow]Run this command? (yes/no): [/yellow]").strip().lower()
+            if response not in ["yes", "y"]:
+                reason = console.input("[yellow]Why not? (this will help me adjust): [/yellow]").strip()
+                return f"User declined to run command: {reason}"
+        
+        # Execute the command using persistent shell
+        try:
+            stdout, stderr, returncode = self.shell.run_command(command)
+            
+            # Format output for both display and API
+            formatted_output = self._format_command_output(command, stdout, stderr, returncode)
+            
+            # Truncate if needed
+            truncated_output, was_truncated = self._truncate_output(formatted_output)
+            
+            # Display to user
+            console.print()
+            syntax = Syntax(truncated_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+            console.print(syntax)
+            
+            # Return output
+            if returncode != 0:
+                return f"Command failed with exit code {returncode}:\n{truncated_output}"
+            return truncated_output
+        except Exception as e:
+            error_msg = f"Error executing command: {str(e)}"
+            console.print(f"\n[red]❌ {error_msg}[/red]")
+            return error_msg
+    
+    def shell_script(self, script: str) -> str:
+        """Execute a block of shell script code. Use this for multi-line scripts, complex command sequences with conditionals/loops, or when you need shell-specific features like pipes, redirections, or environment variable manipulation."""
+        if not script.strip():
+            return "Error: No script provided"
+        
+        # Always require validation for shell scripts
+        console.print("\n[bold]Shell script to execute:[/bold]")
+        syntax = Syntax(script, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+        console.print(syntax)
+        
+        response = console.input("\n[yellow]Run this script? (yes/no): [/yellow]").strip().lower()
+        if response not in ["yes", "y"]:
+            reason = console.input("[yellow]Why not? (this will help me adjust): [/yellow]").strip()
+            return f"User declined to run script: {reason}"
+        
+        # Execute the entire script as a single command
+        try:
+            # For multi-line scripts, we need to pass them as a single command
+            # This preserves shell constructs like loops, conditionals, etc.
+            stdout, stderr, returncode = self.shell.run_command(script)
+            
+            # Format output for both display and API
+            formatted_output = self._format_command_output("(shell script)", stdout, stderr, returncode)
+            
+            # Truncate if needed
+            truncated_output, was_truncated = self._truncate_output(formatted_output)
+            
+            # Display to user
+            console.print()
+            syntax = Syntax(truncated_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+            console.print(syntax)
+            
+            # Return output
+            if returncode != 0:
+                return f"Script failed with exit code {returncode}:\n{truncated_output}"
+            return truncated_output
+        except Exception as e:
+            error_msg = f"Error executing script: {str(e)}"
+            console.print(f"\n[red]❌ {error_msg}[/red]")
+            return error_msg
     
     def _load_documentation(self, doc_names: List[str]) -> str:
         """Load documentation files from the docs directory"""
@@ -385,9 +439,8 @@ class Shelly:
         # Prepare history section
         history_section = ""
         if self.command_history:
-            display_count = CONFIG['history']['display_count']
-            history_section = f"\n\nHere are the last {min(len(self.command_history), display_count)} unique commands from the user's shell history for context:\n"
-            history_section += "\n".join(f"- {cmd}" for cmd in self.command_history[-display_count:])
+            history_section = f"\n\nHere are the last {len(self.command_history)} unique commands from the user's shell history for context:\n"
+            history_section += "\n".join(f"- {cmd}" for cmd in self.command_history)
         
         # Substitute variables in the template
         prompt = prompt_template.substitute(
@@ -470,116 +523,6 @@ class Shelly:
         
         return output
     
-    def _execute_tool(self, tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a tool based on the tool call from Claude"""
-        if tool_name == "run_command":
-            command = tool_input.get("command", "").strip()
-            if not command:
-                return {"success": False, "output": "", "error": "No command provided"}
-            
-            # Check if command needs validation
-            needs_validation = not self._is_greenlisted(command)
-            
-            if needs_validation:
-                # Display command to be run
-                console.print("\n[bold]Command to execute:[/bold]")
-                syntax = Syntax(command, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                response = console.input("\n[yellow]Run this command? (yes/no): [/yellow]").strip().lower()
-                if response not in ["yes", "y"]:
-                    reason = console.input("[yellow]Why not? (this will help me adjust): [/yellow]").strip()
-                    return {
-                        "success": False,
-                        "output": "",
-                        "error": f"User declined to run command: {reason}"
-                    }
-            
-            # Execute the command using persistent shell
-            try:
-                stdout, stderr, returncode = self.shell.run_command(command)
-                
-                # Update current directory if command was cd
-                if command.strip().startswith('cd'):
-                    new_stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
-                    self.current_dir = new_stdout.strip()
-                
-                # Format output for both display and API
-                formatted_output = self._format_command_output(command, stdout, stderr, returncode)
-                
-                # Truncate if needed
-                truncated_output, was_truncated = self._truncate_output(formatted_output)
-                
-                # Display to user
-                console.print()
-                syntax = Syntax(truncated_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                # Return same output to API (what user sees is what model gets)
-                return {
-                    "success": returncode == 0,
-                    "output": truncated_output,
-                    "error": ""
-                }
-            except Exception as e:
-                error_msg = f"Error executing command: {str(e)}"
-                console.print(f"\n[red]❌ {error_msg}[/red]")
-                return {"success": False, "output": "", "error": error_msg}
-        
-        elif tool_name == "shell_script":
-            script = tool_input.get("script", "").strip()
-            if not script:
-                return {"success": False, "output": "", "error": "No script provided"}
-            
-            # Always require validation for shell scripts
-            console.print("\n[bold]Shell script to execute:[/bold]")
-            syntax = Syntax(script, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-            console.print(syntax)
-            
-            response = console.input("\n[yellow]Run this script? (yes/no): [/yellow]").strip().lower()
-            if response not in ["yes", "y"]:
-                reason = console.input("[yellow]Why not? (this will help me adjust): [/yellow]").strip()
-                return {
-                    "success": False,
-                    "output": "",
-                    "error": f"User declined to run script: {reason}"
-                }
-            
-            # Execute the entire script as a single command
-            try:
-                # For multi-line scripts, we need to pass them as a single command
-                # This preserves shell constructs like loops, conditionals, etc.
-                stdout, stderr, returncode = self.shell.run_command(script)
-                
-                # Check if script changed directory
-                if 'cd ' in script:
-                    new_stdout, _, _ = self.shell.run_command("pwd" if platform.system() != 'Windows' else "cd")
-                    self.current_dir = new_stdout.strip()
-                
-                # Format output for both display and API
-                formatted_output = self._format_command_output("(shell script)", stdout, stderr, returncode)
-                
-                # Truncate if needed
-                truncated_output, was_truncated = self._truncate_output(formatted_output)
-                
-                # Display to user
-                console.print()
-                syntax = Syntax(truncated_output, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
-                console.print(syntax)
-                
-                # Return same output to API
-                return {
-                    "success": returncode == 0,
-                    "output": truncated_output,
-                    "error": ""
-                }
-            except Exception as e:
-                error_msg = f"Error executing script: {str(e)}"
-                console.print(f"\n[red]❌ {error_msg}[/red]")
-                return {"success": False, "output": "", "error": error_msg}
-        
-        return {"success": False, "output": "", "error": f"Unknown tool: {tool_name}"}
-    
     def cleanup(self):
         """Cleanup method to close the persistent shell"""
         if hasattr(self, 'shell') and self.shell:
@@ -587,72 +530,26 @@ class Shelly:
     
     def chat(self, initial_message: Optional[str] = None):
         """Start the chat interaction"""
-        messages = []
+        conversation = self.model.conversation(tools=self.tools)
         
         if initial_message:
-            messages.append({"role": "user", "content": initial_message})
+            user_input = initial_message
         else:
             console.print(f"[bold cyan]🐚 Shelly:[/bold cyan] {CONFIG['prompts']['welcome_message']}")
             user_input = console.input("\n[bold green]You:[/bold green] ").strip()
             if not user_input:
                 return
-            messages.append({"role": "user", "content": user_input})
         
         while True:
             try:
-                # Get response from Claude with tools
-                response = self.client.messages.create(
-                    model=CONFIG['model']['name'],
-                    system=self.system_prompt,
-                    messages=messages,
-                    max_tokens=CONFIG['model']['max_tokens'],
-                    tools=self.tools
-                )
+                # Get response from the model with tool use
+                response = conversation.chain(user_input, system_fragments=[self.system_prompt])
                 
-                # Process the response
-                assistant_content = []
-                tool_results = []
-                
-                for content in response.content:
-                    if content.type == "text":
-                        # Use rich markdown for better formatting
-                        console.print(f"\n[bold cyan]🐚 Shelly:[/bold cyan] {content.text}")
-                        assistant_content.append({
-                            "type": "text",
-                            "text": content.text
-                        })
-                    elif content.type == "tool_use":
-                        # Execute the tool
-                        result = self._execute_tool(content.name, content.input)
-                        
-                        # Add tool use to assistant content
-                        assistant_content.append({
-                            "type": "tool_use",
-                            "id": content.id,
-                            "name": content.name,
-                            "input": content.input
-                        })
-                        
-                        # Prepare tool result
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": content.id,
-                            "content": result["output"] if result["success"] else result["error"]
-                        })
-                
-                # Add assistant message to history
-                messages.append({
-                    "role": "assistant",
-                    "content": assistant_content
-                })
-                
-                # If there were tool uses, add the results and continue
-                if tool_results:
-                    messages.append({
-                        "role": "user",
-                        "content": tool_results
-                    })
-                    continue
+                # Display the response
+                console.print(f"\n[bold cyan]🐚 Shelly:[/bold cyan]", end=" ")
+                for chunk in response:
+                    console.print(chunk, end="")
+                console.print()  # New line after response
                 
                 # Get next user input
                 user_input = console.input("\n[bold green]You:[/bold green] ").strip()
@@ -660,8 +557,6 @@ class Shelly:
                     console.print(f"\n[bold cyan]🐚 Shelly:[/bold cyan] {CONFIG['prompts']['goodbye_message']}")
                     self.cleanup()
                     break
-                
-                messages.append({"role": "user", "content": user_input})
                 
             except KeyboardInterrupt:
                 console.print(f"\n\n[bold cyan]🐚 Shelly:[/bold cyan] {CONFIG['prompts']['goodbye_message']}")
@@ -719,7 +614,7 @@ def main():
             
     except ValueError as e:
         console.print(f"[red]❌ Configuration error: {e}[/red]")
-        console.print("Please make sure you have a .env file with ANTHROPIC_API_KEY set.")
+        console.print("Please make sure you have configured your API keys using 'llm keys set' command.")
         sys.exit(1)
     except Exception as e:
         console.print(f"[red]❌ Unexpected error: {e}[/red]")

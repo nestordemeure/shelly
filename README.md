@@ -1,6 +1,6 @@
 # Shelly 🐚
 
-A smart terminal assistant that translates natural language into shell commands. Powered by Claude.
+A smart terminal assistant that translates natural language into shell commands.
 
 Describe what you want in plain English, and Shelly will figure out the right commands, explain what they do, and run them for you.
 
@@ -14,7 +14,7 @@ $ shelly show me the 20 largest files in this directory tree
 
 ## Installation
 
-Clone the repository and install dependencies. You'll need Python 3.7+ and an [Anthropic API key](https://console.anthropic.com/).
+Clone the repository and install dependencies:
 
 ```sh
 # Clone and enter the repository
@@ -26,15 +26,12 @@ python3 -m venv shelly-env
 source shelly-env/bin/activate
 
 # Install dependencies
-pip install anthropic python-dotenv rich
-
-# Optionally, register your Anthropic API key
-echo "ANTHROPIC_API_KEY=your-api-key-here" > .env
+pip install llm python-dotenv rich
 ```
 
-To use `shelly` from anywhere, add this function to your `.bashrc` or `.zshrc`:
+To add a `shelly` command to your terminal, add this function to your `.bashrc` or `.zshrc`:
 
-```bash
+```sh
 shelly() {
   local SHELLY_DIR="/path/to/shelly"  # Update this path
   source "$SHELLY_DIR/shelly-env/bin/activate"
@@ -45,6 +42,15 @@ shelly() {
   deactivate
 }
 ```
+
+Finally, you will need to place your API key in your environment, in a `.env` file in the `shelly` folder, or [directly into llm](https://llm.datasette.io/en/latest/setup.html#api-keys):
+
+```sh
+# Optionally, register your API key
+echo "OPENAI_API_KEY=your-api-key-here" > .env
+```
+
+Shelly defaults to OpenAI models, but you can easily switch to [most model providers](https://llm.datasette.io/en/latest/plugins/directory.html) ([Anthropic](https://github.com/simonw/llm-anthropic), [Gemini](https://github.com/simonw/llm-gemini), [local models](https://llm.datasette.io/en/latest/plugins/directory.html#local-models), etc.) by installing the corresponding [llm plugin](https://llm.datasette.io/en/latest/plugins/installing-plugins.html), changing the model name in [`config.json`](./config.json), and adding the proper API key (if any) to your environment.
 
 ## Usage
 
@@ -67,9 +73,7 @@ $ shelly set up a new git repo with a Python .gitignore
 
 Safe commands (`ls`, `cat`, `grep`, etc.) run automatically. Everything else asks for confirmation first. You can always say no and explain why, and Shelly will adjust.
 
-Edit `config.json` to change the model (defaults to Claude Haiku) or customize which commands run without confirmation.
-
-You can also provide Shelly with custom documentation (defined as markdown files in the in the [docs/](./docs/) directory) about your preferred tools and workflows using the `--docs` (or `-d`) flag:
+You can also provide Shelly with custom documentation (defined as markdown files in the [docs/](./docs/) directory) about your preferred tools and workflows using the `--docs` (or `-d`) flag:
 
 ```sh
 # Use specific documentation
@@ -79,8 +83,10 @@ $ shelly --docs ffmpeg convert this video to mp4
 $ shelly --docs git,docker,kubernetes set up a containerized app with CI/CD
 ```
 
-> ⚠️ **Privacy Note:** Shelly processes your requests, which might include your recent shell history, through Anthropic's API. If privacy is a concern, you will want to use a local model.
+Edit [`config.json`](./config.json) to change the model (defaults to `gpt-4.1-mini`) or customize which commands run without confirmation.
+
+> ⚠️ **Privacy Note:** By default, Shelly processes your requests, which might include your recent shell history, through the model's API. If privacy is a concern, you will want to [switch to a local model](https://llm.datasette.io/en/latest/plugins/directory.html#local-models).
 
 ## TODO
 
-* Switch to [llm](https://llm.datasette.io/en/latest/python-api.html) as a backend to open the door to other APIs / local models?
+* Ensure the explanation is displayed before the code block, maybe by making it part of the tool call.
