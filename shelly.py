@@ -268,11 +268,11 @@ class Shelly:
         
         if needs_validation:
             # Display command to be run
-            console.print("\n[bold]Command to execute:[/bold]")
-            syntax = Syntax(command, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+            console.print()  # Add blank line before code block
+            syntax = Syntax(command, "sh", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
             console.print(syntax)
             
-            response = console.input("\n[yellow]Run this command? (yes/no): [/yellow]").strip().lower()
+            response = console.input("[yellow]Run this command? (yes/no): [/yellow]").strip().lower()
             if response not in ["yes", "y"]:
                 reason = console.input("[yellow]Why not? (this will help me adjust): [/yellow]").strip()
                 return f"User declined to run command: {reason}"
@@ -307,11 +307,11 @@ class Shelly:
             return "Error: No script provided"
         
         # Always require validation for shell scripts
-        console.print("\n[bold]Shell script to execute:[/bold]")
-        syntax = Syntax(script, "bash", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
+        console.print()  # Add blank line before code block
+        syntax = Syntax(script, "sh", theme=CONFIG['display']['theme'], line_numbers=CONFIG['display']['show_line_numbers'])
         console.print(syntax)
         
-        response = console.input("\n[yellow]Run this script? (yes/no): [/yellow]").strip().lower()
+        response = console.input("[yellow]Run this script? (yes/no): [/yellow]").strip().lower()
         if response not in ["yes", "y"]:
             reason = console.input("[yellow]Why not? (this will help me adjust): [/yellow]").strip()
             return f"User declined to run script: {reason}"
