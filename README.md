@@ -71,9 +71,9 @@ $ shelly what's eating up disk space in my home directory?
 $ shelly set up a new git repo with a Python .gitignore
 ```
 
-Safe commands (`ls`, `cat`, `grep`, etc.) run automatically. Everything else asks for confirmation first. You can always say no and explain why, and Shelly will adjust.
+Safe commands (`ls`, `cat`, `grep`, etc.) run automatically. Everything else asks for confirmation first. You can always say no and explain why, Shelly will adjust.
 
-You can also provide Shelly with custom documentation (defined as markdown files in the [docs/](./docs/) directory) about your preferred tools and workflows using the `--docs` (or `-d`) flag:
+You can also provide Shelly with custom documentation (defined as markdown files in the [docs/](./docs/) directory) about your preferred tools and workflows, using the `--docs` (or `-d`) flag:
 
 ```sh
 # Use specific documentation
@@ -86,7 +86,3 @@ $ shelly --docs git,docker,kubernetes set up a containerized app with CI/CD
 Edit [`config.json`](./config.json) to change the model (defaults to `gpt-4.1-mini`) or customize which commands run without confirmation.
 
 > ⚠️ **Privacy Note:** By default, Shelly processes your requests, which might include your recent shell history, through the model's API. If privacy is a concern, you will want to [switch to a local model](https://llm.datasette.io/en/latest/plugins/directory.html#local-models).
-
-## TODO
-
-* Ensure the explanation is displayed before the code block, maybe by making it part of the tool call.
