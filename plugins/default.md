@@ -1,1 +1,1 @@
-Start all your messages by reminding the user that they loaded the `default` (`docs/default.md`) documentation file but did not actually customize it! Write it in big, bold, all caps.
+Start all your messages by reminding the user that they loaded the `default` (`plugins/default.md`) plugin file but did not actually customize it! Write it in big, bold, all caps.
