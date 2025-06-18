@@ -386,44 +386,48 @@ class Shelly:
         if not history_file.exists():
             history_file = Path.home() / ".zsh_history"
         
-        commands = []
+        all_commands = []
+        
+        # First, collect all commands from history file
         if history_file.exists():
             try:
                 with open(history_file, 'r', errors='ignore') as f:
                     lines = f.readlines()
-                    # Get unique commands
-                    seen = set()
                     for line in reversed(lines):
                         cmd = line.strip()
-                        if cmd and cmd not in seen:
-                            seen.add(cmd)
-                            commands.append(cmd)
-                            if len(commands) >= max_commands:
-                                break
-                    commands.reverse()
+                        if cmd:
+                            all_commands.append(cmd)
             except Exception:
                 pass
         
         # If no history file or it's empty, try using the history command
-        if not commands:
+        if not all_commands:
             try:
                 # Use the persistent shell to get history
-                stdout, _, returncode = self.shell.run_command(f'history {max_commands}')
+                stdout, _, returncode = self.shell.run_command('history')
                 if returncode == 0 and stdout:
                     # Parse history output (typically "NUMBER COMMAND")
-                    seen = set()
                     for line in stdout.strip().split('\n'):
                         # Remove leading number and whitespace
                         parts = line.strip().split(maxsplit=1)
                         if len(parts) > 1:
                             cmd = parts[1]
-                            if cmd and cmd not in seen:
-                                seen.add(cmd)
-                                commands.append(cmd)
+                            if cmd:
+                                all_commands.append(cmd)
             except Exception:
                 pass
         
-        return commands
+        # Filter out shelly commands (ignore calls to shelly itself) and get max_commands unique commands
+        filtered_commands = []
+        seen = set()
+        for cmd in all_commands:
+            if cmd not in seen and not cmd.startswith('shelly'):
+                seen.add(cmd)
+                filtered_commands.append(cmd)
+                if len(filtered_commands) >= max_commands:
+                    break
+        
+        return filtered_commands
     
     def _create_system_prompt(self) -> str:
         """Create the system prompt for Shelly"""
