@@ -38,7 +38,7 @@ shelly() {
   set -a
   [ -f "$SHELLY_DIR/.env" ] && source "$SHELLY_DIR/.env"
   set +a
-  python3 "$SHELLY_DIR/shelly.py" "$@"  # Add --docs default to auto-load your docs/default.md
+  python3 "$SHELLY_DIR/shelly.py" "$@"  # Add --plugins default to auto-load your plugins/default.md
   deactivate
 }
 ```
@@ -73,20 +73,16 @@ $ shelly set up a new git repo with a Python .gitignore
 
 Safe commands (`ls`, `cat`, `grep`, etc.) run automatically. Everything else asks for confirmation first. You can always say no and explain why, Shelly will adjust.
 
-You can also provide Shelly with custom documentation (defined as markdown files in the [docs/](./docs/) directory) about your preferred tools and workflows, using the `--docs` (or `-d`) flag:
+You can also provide Shelly with custom instructions (defined as markdown files in the [plugins/](./plugins/) directory) about your preferred tools and workflows, using the `--plugins` (or `-p`) flag:
 
 ```sh
-# Use specific documentation
-$ shelly --docs ffmpeg convert this video to mp4
+# Use specific plugin
+$ shelly --plugins ffmpeg convert this video to mp4
 
-# Load multiple documentation files
-$ shelly --docs git,docker,kubernetes set up a containerized app with CI/CD
+# Load multiple plugin files
+$ shelly --plugins git,docker,kubernetes set up a containerized app with CI/CD
 ```
 
 Edit [`config.json`](./config.json) to change the model (defaults to `gpt-4.1-mini`) or customize which commands run without confirmation.
 
 > ⚠️ **Privacy Note:** By default, Shelly processes your requests, which might include your recent shell history, through the model's API. If privacy is a concern, you will want to [switch to a local model](https://llm.datasette.io/en/latest/plugins/directory.html#local-models).
-
-## TODO
-
-* move from docs to plugin

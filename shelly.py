@@ -226,7 +226,7 @@ class PersistentShell:
 class Shelly:
     """Main Shelly assistant class"""
     
-    def __init__(self, docs: Optional[List[str]] = None):
+    def __init__(self, plugins: Optional[List[str]] = None):
         # Get model from config or use default
         model_name = CONFIG['model']['name']
         
@@ -249,8 +249,8 @@ class Shelly:
         # Get last unique shell commands from history
         self.command_history = self._get_command_history(CONFIG['shell_history_size'])
         
-        # Load documentation files if specified
-        self.custom_docs = self._load_documentation(docs) if docs else ""
+        # Load plugin files if specified
+        self.custom_plugins = self._load_plugins(plugins) if plugins else ""
         
         # Define system prompt
         self.system_prompt = self._create_system_prompt()
@@ -342,32 +342,30 @@ class Shelly:
             console.print(f"\n[red]❌ {error_msg}[/red]")
             return error_msg
     
-    def _load_documentation(self, doc_names: List[str]) -> str:
-        """Load documentation files from the docs directory"""
-        docs_dir = Path(__file__).parent / "docs"
-        loaded_docs = []
+    def _load_plugins(self, plugin_names: List[str]) -> str:
+        """Load plugin files from the plugins directory"""
+        plugins_dir = Path(__file__).parent / "plugins"
+        loaded_plugins = []
         
-        for doc_name in doc_names:
+        for plugin_name in plugin_names:
             # Remove .md extension if provided
-            if doc_name.endswith('.md'):
-                doc_name = doc_name[:-3]
+            if plugin_name.endswith('.md'):
+                plugin_name = plugin_name[:-3]
             
-            doc_path = docs_dir / f"{doc_name}.md"
+            plugin_path = plugins_dir / f"{plugin_name}.md"
             
-            if doc_path.exists():
+            if plugin_path.exists():
                 try:
-                    with open(doc_path, 'r', encoding='utf-8') as f:
+                    with open(plugin_path, 'r', encoding='utf-8') as f:
                         content = f.read()
-                        loaded_docs.append(f"\n\n## Documentation: {doc_name}\n\n{content}")
-                        console.print(f"[green]✓ Loaded documentation: {doc_name}[/green]")
+                        loaded_plugins.append(f"---\n\n{content}")
+                        console.print(f"[green]✓ Loaded plugin: {plugin_name}[/green]")
                 except Exception as e:
-                    console.print(f"[yellow]⚠ Warning: Could not load {doc_path}: {e}[/yellow]")
+                    console.print(f"[yellow]⚠ Warning: Could not load {plugin_path}: {e}[/yellow]")
             else:
-                console.print(f"[yellow]⚠ Warning: Documentation file not found: {doc_path}[/yellow]")
+                console.print(f"[yellow]⚠ Warning: Plugin file not found: {plugin_path}[/yellow]")
         
-        if loaded_docs:
-            return "\n\n---\n\n# Custom Documentation\n" + "".join(loaded_docs)
-        return ""
+        return "\n\n".join(loaded_plugins) if loaded_plugins else ""
     
     def _get_system_info(self) -> Dict[str, str]:
         """Get OS and shell information"""
@@ -456,9 +454,9 @@ class Shelly:
             history_section=history_section
         )
         
-        # Append custom documentation if loaded
-        if self.custom_docs:
-            prompt += self.custom_docs
+        # Append custom plugins if loaded
+        if self.custom_plugins:
+            prompt += "\n\n" + self.custom_plugins
         
         return prompt
     
@@ -581,14 +579,14 @@ def parse_arguments():
                "  shelly                                      # Start interactive mode\n"
                "  shelly find all python files                # Natural language request\n"
                "  shelly show me the largest files here       # Another request\n"
-               "  shelly --docs git,docker deploy my app      # Use multiple user-provided docs",
+               "  shelly --plugins git,docker deploy my app   # Use multiple user-provided plugins",
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
     parser.add_argument(
-        '-d', '--docs',
+        '-p', '--plugins',
         type=str,
-        help='Comma-separated list of documentation files (e.g., git,docker,ffmpeg) to load from the /docs folder'
+        help='Comma-separated list of plugin files (e.g., git,docker,ffmpeg) to load from the /plugins folder'
     )
     
     parser.add_argument(
@@ -603,14 +601,14 @@ def main():
     """Main entry point"""
     args = parse_arguments()
     
-    # Parse docs if provided
-    docs = None
-    if args.docs:
-        docs = [doc.strip() for doc in args.docs.split(',') if doc.strip()]
+    # Parse plugins if provided
+    plugins = None
+    if args.plugins:
+        plugins = [plugin.strip() for plugin in args.plugins.split(',') if plugin.strip()]
     
     shelly = None
     try:
-        shelly = Shelly(docs=docs)
+        shelly = Shelly(plugins=plugins)
         
         # Check if called with request arguments
         if args.request:
