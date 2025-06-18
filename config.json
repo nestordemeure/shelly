@@ -3,6 +3,10 @@
         "name": "gpt-4.1-mini"
     },
     "shell_history_size": 500,
+    "ignored_history_commands": [
+        "shelly",
+        "code"
+    ],
     "output_truncation": {
         "max_lines": 1000,
         "max_characters": 80000

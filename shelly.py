@@ -417,11 +417,14 @@ class Shelly:
             except Exception:
                 pass
         
-        # Filter out shelly commands (ignore calls to shelly itself) and get max_commands unique commands
+        # Filter out ignored commands and get max_commands unique commands
+        ignored_commands = CONFIG.get('ignored_history_commands', [])
         filtered_commands = []
         seen = set()
         for cmd in all_commands:
-            if cmd not in seen and not cmd.startswith('shelly'):
+            # Check if command starts with any ignored command
+            should_ignore = any(cmd.startswith(ignored_cmd) for ignored_cmd in ignored_commands)
+            if cmd not in seen and not should_ignore:
                 seen.add(cmd)
                 filtered_commands.append(cmd)
                 if len(filtered_commands) >= max_commands:
