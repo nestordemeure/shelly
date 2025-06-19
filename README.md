@@ -12,6 +12,8 @@ $ find . -type f -exec ls -la {} \; | sort -k5 -rn | head -20
 $ shelly show me the 20 largest files in this directory tree
 ```
 
+> ⚠️ **Warning:** This branch covers specifics to get `shelly` running on NERSC systems using the [Cborg API](https://cborg.lbl.gov/api_examples/). Including installation instructions and a [`nersc.md`](./plugins/nersc.md) dedicated plugin.
+
 ## Installation
 
 Clone the repository and install dependencies:
@@ -22,6 +24,7 @@ git clone https://github.com/nestordemeure/shelly.git
 cd shelly
 
 # Set up Python environment
+module load python
 python3 -m venv shelly-env
 source shelly-env/bin/activate
 
@@ -38,16 +41,16 @@ shelly() {
   set -a
   [ -f "$SHELLY_DIR/.env" ] && source "$SHELLY_DIR/.env"
   set +a
-  python3 "$SHELLY_DIR/shelly.py" "$@"  # Add --plugins default to auto-load your plugins/default.md
+  python3 "$SHELLY_DIR/shelly.py" --plugins nersc "$@"
   deactivate
 }
 ```
 
-Finally, you will need to place your API key in your environment, in a `.env` file in the `shelly` folder, or [directly into llm](https://llm.datasette.io/en/latest/setup.html#api-keys):
+Finally, you will need to place your Cborg API key in your environment, in a `.env` file in the `shelly` folder, or [directly into llm](https://llm.datasette.io/en/latest/setup.html#api-keys):
 
 ```sh
 # Optionally, register your API key
-echo "OPENAI_API_KEY=your-api-key-here" > .env
+echo "CBORG_API_KEY=your-api-key-here" > .env
 ```
 
 Shelly defaults to OpenAI models, but you can easily switch to [most model providers](https://llm.datasette.io/en/latest/plugins/directory.html) ([Anthropic](https://github.com/simonw/llm-anthropic), [Gemini](https://github.com/simonw/llm-gemini), [local models](https://llm.datasette.io/en/latest/plugins/directory.html#local-models), etc.) by installing the corresponding [llm plugin](https://llm.datasette.io/en/latest/plugins/installing-plugins.html), changing the model name in [`config.json`](./config.json), and adding the proper API key (if any) to your environment.
@@ -66,9 +69,9 @@ You: find all python files modified in the last week
 Or run one-off commands:
 
 ```sh
-$ shelly find all Python files modified in the last week
-$ shelly what's eating up disk space in my home directory?
-$ shelly set up a new git repo with a Python .gitignore
+shelly find all Python files modified in the last week
+shelly what's eating up disk space in my home directory?
+shelly set up a new git repo with a Python .gitignore
 ```
 
 Safe commands (`ls`, `cat`, `grep`, etc.) run automatically. Everything else asks for confirmation first. You can always say no and explain why, Shelly will adjust.
@@ -88,3 +91,14 @@ $ shelly --plugins git,docker,kubernetes set up a containerized app with CI/CD
 Edit [`config.json`](./config.json) to change the model (defaults to `gpt-4.1-mini`) or customize which commands run without confirmation.
 
 > ⚠️ **Privacy Note:** By default, Shelly processes your requests, which might include your recent shell history, through the model's API. If privacy is a concern, you will want to [switch to a local model](https://llm.datasette.io/en/latest/plugins/directory.html#local-models).
+
+## TODO
+
+* have llm use the cborg path and api key
+* add slurm commands
+  * as a plugin
+  * to greenlighted list
+* add lmod commands
+  * plugin
+  * greenlighted
+* add [slog](https://gitlab.nersc.gov/nersc/nersc-user-env/experimental/slog) as an example of what can be done
