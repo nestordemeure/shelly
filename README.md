@@ -32,6 +32,31 @@ source shelly-env/bin/activate
 pip install llm python-dotenv rich
 ```
 
+Configure llm to use CBORG, adding out model of choice (here `openai/gpt-4.1-mini`, do not forget to also set it in [`config.json`](./config.json)) to its configuration file:
+
+```sh
+# Load the env
+source shelly-env/bin/activate
+
+# Register your CBORG API key
+llm keys set cborg
+
+# Locate the LLM configuration file
+LLM_DIR=$(dirname "$(llm logs path)")
+CONFIG_FILE="$LLM_DIR/extra-openai-models.yaml"
+
+# Write our model configuration to the YAML file
+cat <<EOF > "$CONFIG_FILE"
+- model_id: cborg-gpt-4.1-mini
+  model_name: openai/gpt-4.1-mini
+  api_base: "https://api.cborg.lbl.gov"
+  api_key_name: cborg
+EOF
+
+# Check that we did add our model to the list
+llm models
+```
+
 To add a `shelly` command to your terminal, add this function to your `.bashrc` or `.zshrc`:
 
 ```sh
@@ -45,15 +70,6 @@ shelly() {
   deactivate
 }
 ```
-
-Finally, you will need to place your Cborg API key in your environment, in a `.env` file in the `shelly` folder, or [directly into llm](https://llm.datasette.io/en/latest/setup.html#api-keys):
-
-```sh
-# Optionally, register your API key
-echo "CBORG_API_KEY=your-api-key-here" > .env
-```
-
-Shelly defaults to OpenAI models, but you can easily switch to [most model providers](https://llm.datasette.io/en/latest/plugins/directory.html) ([Anthropic](https://github.com/simonw/llm-anthropic), [Gemini](https://github.com/simonw/llm-gemini), [local models](https://llm.datasette.io/en/latest/plugins/directory.html#local-models), etc.) by installing the corresponding [llm plugin](https://llm.datasette.io/en/latest/plugins/installing-plugins.html), changing the model name in [`config.json`](./config.json), and adding the proper API key (if any) to your environment.
 
 ## Usage
 
