@@ -1,6 +1,6 @@
 {
     "model": {
-        "name": "openai/gpt-4.1-mini"
+        "name": "cborg-gpt-4.1-mini"
     },
     "shell_history_size": 500,
     "ignored_history_commands": [
