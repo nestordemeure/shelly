@@ -72,7 +72,7 @@ shelly() {
   set -a
   [ -f "$SHELLY_DIR/.env" ] && source "$SHELLY_DIR/.env"
   set +a
-  python3 "$SHELLY_DIR/shelly.py" --plugins nersc slog "$@"
+  python3 "$SHELLY_DIR/shelly.py" --plugins nersc,slog "$@"
   deactivate
 }
 ```
@@ -113,7 +113,3 @@ $ shelly --plugins git,docker,kubernetes set up a containerized app with CI/CD
 Edit [`config.json`](./config.json) to change the model (defaults to `gpt-4.1-mini`) or customize which commands run without confirmation.
 
 > ⚠️ **Privacy Note:** By default, Shelly processes your requests, which might include your recent shell history, through the model's API. If privacy is a concern, you will want to [switch to a local model](https://llm.datasette.io/en/latest/plugins/directory.html#local-models).
-
-## TODO
-
-* merge the more permissive greenlist approach into main
