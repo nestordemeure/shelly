@@ -72,7 +72,7 @@ shelly() {
   set -a
   [ -f "$SHELLY_DIR/.env" ] && source "$SHELLY_DIR/.env"
   set +a
-  python3 "$SHELLY_DIR/shelly.py" --plugins nersc "$@"
+  python3 "$SHELLY_DIR/shelly.py" --plugins nersc slog "$@"
   deactivate
 }
 ```
@@ -116,10 +116,4 @@ Edit [`config.json`](./config.json) to change the model (defaults to `gpt-4.1-mi
 
 ## TODO
 
-* add slurm commands
-  * as a plugin
-  * to greenlighted list
-* add lmod commands
-  * plugin
-  * greenlighted
-* add [slog](https://gitlab.nersc.gov/nersc/nersc-user-env/experimental/slog) as an example of what can be done
+* merge the more permissive greenlist approach into main
