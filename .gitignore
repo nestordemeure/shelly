@@ -1,6 +1,8 @@
 # Shelly specific
 shelly-env/
 docs/
+# NERSC specific
+llm_models.yaml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
