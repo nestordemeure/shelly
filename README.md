@@ -32,7 +32,7 @@ source shelly-env/bin/activate
 pip install llm python-dotenv rich
 ```
 
-Configure llm to use CBORG, adding out model of choice (here `openai/gpt-4.1-mini`, do not forget to also set it in [`config.json`](./config.json)) to its configuration file:
+Configure llm to use CBORG, adding out model of choice (here `openai/gpt-4.1-mini`, check the [CBorg Models page](https://cborg.lbl.gov/models/) for a list of models currently available with tool use) to its configuration file (do not forget to also set it in [`config.json`](./config.json)):
 
 ```sh
 # Load the env
@@ -45,12 +45,18 @@ llm keys set cborg
 LLM_DIR=$(dirname "$(llm logs path)")
 CONFIG_FILE="$LLM_DIR/extra-openai-models.yaml"
 
+# Create a local shortcut to the config file for ease of use
+ln -s "$CONFIG_FILE" llm_models.yaml
+
 # Write our model configuration to the YAML file
+# Note the use of the (here openai) pass-throught in the url to enable tool use
 cat <<EOF > "$CONFIG_FILE"
 - model_id: cborg-gpt-4.1-mini
   model_name: openai/gpt-4.1-mini
   api_base: "https://api.cborg.lbl.gov"
   api_key_name: cborg
+  supports_tools: True
+  supports_schema: True
 EOF
 
 # Check that we did add our model to the list
@@ -110,7 +116,6 @@ Edit [`config.json`](./config.json) to change the model (defaults to `gpt-4.1-mi
 
 ## TODO
 
-* have llm use the cborg path and api key
 * add slurm commands
   * as a plugin
   * to greenlighted list
