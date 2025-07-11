@@ -17,6 +17,7 @@
     },
     "validate_all_commands": false,
     "greenlist_commands": [
+        "man",
         "cd",
         "ls",
         "pwd",
