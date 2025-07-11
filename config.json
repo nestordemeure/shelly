@@ -51,7 +51,16 @@
         "uptime",
         "w",
         "who",
-        "last"
+        "last",
+        "squeue",
+        "sinfo",
+        "scontrol show",
+        "module avail",
+        "ml av",
+        "module list",
+        "module spider",
+        "module whatis",
+        "module help"
     ],
     "prompts": {
         "welcome_message": "Hi! I'm Shelly, your terminal assistant. Ask me to help you run any shell commands!",
