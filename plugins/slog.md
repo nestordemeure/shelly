@@ -1,4 +1,4 @@
-### **Job Analysis Workflow Example**
+## Job Analysis Workflow Example
 
 This workflow demonstrates how to manually investigate a completed or failed job by gathering details about its execution, the nodes it ran on, and any relevant system events that occurred during its runtime. This process is useful for diagnosing why a job might have failed unexpectedly.
 
