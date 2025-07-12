@@ -1,62 +1,69 @@
-## Job Analysis Workflow Example
+### SLURM Job Analysis Example: Diagnosing a Failed Job
 
-This workflow demonstrates how to manually investigate a completed or failed job by gathering details about its execution, the nodes it ran on, and any relevant system events that occurred during its runtime. This process is useful for diagnosing why a job might have failed unexpectedly.
+This workflow illustrates how to investigate a completed or failed job by correlating SLURM job metadata, node assignment, and system events. It’s aimed at pinpointing whether failures are due to application errors or system issues.
 
-Let's assume you want to analyze your job that was assigned the ID **`65537`**.
+Suppose you are analyzing job **`65537`**.
 
-#### **Step 1: Get Basic Job Status and Details**
+#### 1. **Check Job Summary**
 
-First, find your job to see its final state and get high-level details. While `squeue` is for active jobs, the **`sacct`** command is best for post-mortem analysis.
+Use `sacct` to get the job’s final state, exit code, timing, and node assignment:
 
-* **Command:** Use `sacct` to find your job.
+```bash
+sacct --jobs=65537 -o JobID,JobName,User,State,ExitCode,Start,End,NodeList
+```
 
-    ```bash
-    sacct --jobs=65537 -o JobID,JobName,User,State,ExitCode,Start,End,NodeList
-    ```
+*Key checks:*
 
-* **Analysis:** Look at the `State` and `ExitCode`. A `FAILED` state or a non-zero `ExitCode` indicates a problem. Note the `Start` and `End` times, as well as the `NodeList`.
+* **`State`**: `FAILED`, `CANCELLED`, or `NODE_FAIL` indicate abnormal termination.
+* **`ExitCode`**: Non-zero exit codes suggest application-level errors.
+* **`Start/End`** and **`NodeList`** will help correlate node events.
 
-    ```
-    JobID     JobName      User      State      ExitCode    Start             End               NodeList
-    --------- ------------ --------- ---------- --------    ------------------- ------------------- --------
-    65537     my_sim       username  FAILED     1:0         2025-07-11T10:00:00 2025-07-11T10:15:00  pm0123
-    ```
+Example output:
 
-#### **Step 2: Get Exhaustive Job Information**
+```
+JobID     JobName   User      State   ExitCode  Start                 End                   NodeList
+65537     my_sim    user1     FAILED  1:0       2025-07-11T10:00:00   2025-07-11T10:15:00   pm0123
+```
 
-Next, get all the details SLURM has on the job. This includes the full submission script and constraints.
+#### 2. **Inspect Detailed Job Info**
 
-* **Command:** Use `scontrol show job`.
+Get the full job record with `scontrol`:
 
-    ```bash
-    scontrol show job 65537
-    ```
+```bash
+scontrol show job 65537
+```
 
-* **Analysis:** This command provides dozens of lines of information. Pay special attention to:
-  * **`Command`**: The application that was run.
-  * **`WorkDir`**: The working directory.
-  * **`StdOut`/`StdErr`**: The location of your output and error files, which are crucial for debugging.
-  * **`Reason`**: If the job failed, this may show `NodeFail` or `TimeLimit`.
-  * **`NodeList` / `Contiguous`**: The exact nodes used.
+*Focus on:*
 
-#### **Step 3: Check for Node-Level Events**
+* **`Command`**: Application invoked.
+* **`StdOut` / `StdErr`**: Paths to log files for debugging.
+* **`WorkDir`**: Context of job execution.
+* **`Reason`**: If `NODE_FAIL` or `TIMEOUT`, investigate further.
 
-A common reason for mysterious job failures is an issue with the hardware itself. You can check for events like a node being drained or failing during your job's execution window.
+#### 3. **Check Node Events**
 
-* **Command:** Use `sacctmgr` to show events for the specific node (`pm0123`) around the time the job ran. Add a small buffer (e.g., 5-10 minutes) around the job's `Start` and `End` times.
+If the failure hints at a node issue, examine system events for the node during the job’s runtime.
 
-    ```bash
-    # Job ran from 10:00 to 10:15. We'll check from 09:55 to 10:20.
-    sacctmgr show event start=2025-07-11T09:55:00 end=2025-07-11T10:20:00 node=pm0123 --parsable2
-    ```
+```bash
+# Job ran 10:00–10:15; check a slightly wider window:
+sacctmgr show event start=2025-07-11T09:55:00 end=2025-07-11T10:20:00 node=pm0123 --parsable2
+```
 
-* **Analysis:** Look for any output. If the command returns information, it means an event occurred on that node in the time window.
+*Key insight:*
+Any reported `DRAIN`, `DOWN`, or similar events during the job window indicate system-level causes.
 
-    ```
-    Cluster|NodeName|TimeStart|TimeEnd|State|Reason|User
-    perlmutter|pm0123|2025-07-11T10:12:00||drain|node unexpected reboot|root
-    ```
+Example:
 
-    This output is a strong indicator that the job failed because the node it was running on was drained by an administrator at `10:12`, which was during the job's execution.
+```
+Cluster|NodeName|TimeStart          |State |Reason                   |User
+perlmutter|pm0123|2025-07-11T10:12:00|drain |node unexpected reboot   |root
+```
 
-By following this workflow, you can often pinpoint whether a job failure was due to an application error (found in your `StdErr` file) or a system/hardware issue.
+Here, the node drained mid-job, likely causing the failure.
+
+#### **Summary**
+
+This workflow isolates failures to:
+
+* **Application errors**: Non-zero `ExitCode`, logs in `StdErr`.
+* **System issues**: Node events (`sacctmgr`), hardware faults.
