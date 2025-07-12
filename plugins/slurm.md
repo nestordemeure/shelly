@@ -1,187 +1,266 @@
-## SLURM: Simple Linux Utility for Resource Management**
+# SLURM: Simple Linux Utility for Resource Management
 
 SLURM is the queueing system used to manage and schedule jobs on Perlmutter. It provides a suite of commands to submit, monitor, and control computational work.
 
-### **sbatch: Submit a Batch Job**
+### Job Submission Commands
 
-The sbatch command is used to submit a non-interactive job script to the SLURM controller. The script typically contains resource requests and the commands to be executed.
+These commands are used to request resource allocations and run jobs.
 
-**Key Concepts:**
+#### `sbatch`
 
-* **Job Script:** A standard shell script (e.g., bash) with special \#SBATCH directives at the top to request resources.  
-* **Asynchronous Execution:** sbatch exits immediately after submitting the script, providing a job ID. The job runs later when resources become available.  
-* **Output Files:** By default, standard output and error are written to a file named slurm-%j.out, where %j is the job ID.
+Submits a batch script to the SLURM queue for later execution.
 
-**Common Options (can be used in script with \#SBATCH or on the command line):**
+**Synopsis**
+`sbatch [OPTIONS]... [SCRIPT]`
 
-| Option | Long Option | Description |
-| :---- | :---- | :---- |
-| \-J \<name\> | \--job-name=\<name\> | Assign a name to the job. |
-| \-N \<count\> | \--nodes=\<count\> | Request a specific number of nodes. |
-| \-n \<count\> | \--ntasks=\<count\> | Request a specific number of tasks (often MPI ranks). |
-| \-c \<cpus\> | \--cpus-per-task=\<cpus\> | Request a number of CPUs for each task (for multithreading). |
-| \-t \<time\> | \--time=\<time\> | Set a time limit for the job (e.g., HH:MM:SS, D-HH:MM). |
-| \-p \<name\> | \--partition=\<name\> | Submit the job to a specific partition (queue). |
-| \-A \<account\> | \--account=\<account\> | Charge the job to a specific account/project. |
-| \-o \<file\> | \--output=\<file\> | Specify the standard output file. Use %j for job ID, %a for array index. |
-| \-e \<file\> | \--error=\<file\> | Specify the standard error file. |
-| \--gpus=\<num\> | \--gpus=\<num\> | Request a total number of GPUs for the job. |
-| \--gpus-per-node=\<num\> | \--gpus-per-node=\<num\> | Request a specific number of GPUs on each node. |
-| \-C \<features\> | \--constraint=\<features\> | Request nodes with specific features (e.g., gpu). |
-| \-a \<indexes\> | \--array=\<indexes\> | Submit a job array (e.g., 0-15, 1,5,10-20%4). |
+**How it Works**
+`sbatch` submits a script that typically begins with `#SBATCH` directives. These directives specify job options directly within the script. The command exits immediately after the job is successfully queued, providing a job ID. The job may wait in the queue before resources are allocated and it begins execution.
 
-**Example sbatch Script:**
+**Key Options**
 
-\#\!/bin/bash  
-\#SBATCH \--job-name=my\_simulation  
-\#SBATCH \--nodes=4  
-\#SBATCH \--ntasks-per-node=32  
-\#SBATCH \--cpus-per-task=2  
-\#SBATCH \--time=01:30:00  
-\#SBATCH \--account=my\_project  
-\#SBATCH \--partition=gpu  
-\#SBATCH \--gpus-per-node=4  
-\#SBATCH \--constraint=gpu
+* **Job Naming and Output:**
+  * `-J, --job-name=<name>`: Specify a name for the job.
+  * `-o, --output=<file>`: Path for standard output. By default, this is `slurm-%j.out`.
+  * `-e, --error=<file>`: Path for standard error.
+* **Resource Requests:**
+  * `-N, --nodes=<count>`: Request a specific number of nodes.
+  * `-n, --ntasks=<count>`: Request a specific number of tasks.
+  * `-c, --cpus-per-task=<count>`: Request a number of CPUs for each task.
+  * `--mem=<size>`: Specify memory required per node (e.g., `4G`, `100M`).
+  * `--mem-per-cpu=<size>`: Specify memory required per CPU.
+  * `-t, --time=<time>`: Set a time limit for the job (e.g., `1-12:30:00`, `30:00`).
+  * `-p, --partition=<name>`: Request a specific partition [queue](cite: 610).
+  * `-G, --gpus=<[type:]count>`: Request a total number of GPUs.
+  * `--gpus-per-node=<[type:]count>`: Request a number of GPUs on each node.
+* **Job Dependencies and Control:**
+  * `-d, --dependency=<type:jobid>`: Defer job start until another job meets a condition. Common types are `afterok` (dependent job succeeded) and `afterany` [dependent job terminated](cite: 191, 196).
+  * `--hold`: Submit the job in a held state.
+  * `-a, --array=<indexes>`: Submit a job array, creating multiple jobs from a single script. Examples: `--array=1-10` or `--array=1,5,10`. A "slot limit" can be added with a `%` (e.g., `0-15%4`) to run a maximum of 4 tasks at once.
+* **Email Notifications:**
+  * `--mail-user=<address>`: Email address for notifications.
+  * `--mail-type=<type>`: Specify event for notification (e.g., `BEGIN`, `END`, `FAIL`, `ALL`).
 
-\# Load necessary modules  
-module load a\_scientific\_library
+#### `srun`
 
-\# Run the parallel application  
-srun my\_parallel\_executable \--input-file data.in
+Runs a parallel job or a step within an existing job allocation. `srun` can either create a new allocation or be used inside an `sbatch` script or `salloc` session to launch parallel tasks.
 
-**To submit this script:** sbatch my\_script.sh
+**Synopsis**
+`srun [OPTIONS]... EXECUTABLE [ARGS]...`
 
-### **srun: Run a Parallel Job Step**
+**Key Options**
 
-The srun command is used to launch parallel tasks across the resources allocated to a job. It can be used within an sbatch script to run the main application or interactively within an salloc session.
+* **Task and Resource Specification:**
+  * `-N, --nodes=<count>`: Number of nodes for the step.
+  * `-n, --ntasks=<count>`: Total number of tasks to launch.
+  * `-c, --cpus-per-task=<count>`: Number of CPUs per task. This implies `--exact`.
+  * `--gpus-per-task=<count>`: Request a specific number of GPUs for each task.
+  * `--distribution=<type>`: Specify how tasks are distributed across nodes (e.g., `block`, `cyclic`).
+  * `--exclusive`: Allocate dedicated resources for the step, preventing other steps from sharing CPUs.
+  * `--overlap`: Allow a job step to share resources with other steps.
+* **Input/Output:**
+  * `-o, --output=<file>`: Redirect stdout for all tasks.
+  * `-i, --input=<mode>`: Specify stdin redirection.
+  * `--label`: Prepend each line of output with the task number.
+* **Execution Control:**
+  * `--multi-prog`: Run different programs for different tasks using a configuration file.
+  * `--pty`: Execute task 0 in a pseudo-terminal.
 
-**Key Concepts:**
+#### `salloc`
 
-* **Job Step:** A command executed by srun within a job's resource allocation. A single job can have multiple job steps.  
-* **Task Distribution:** srun is responsible for distributing the specified number of tasks across the allocated nodes and CPUs.
+Obtains a SLURM job allocation and typically starts a shell or a specified command within that allocation. It's used for interactive sessions.
 
-**Common Options:**
+**Synopsis**
+`salloc [OPTIONS]... [COMMAND]`
 
-| Option | Long Option | Description |
-| :---- | :---- | :---- |
-| \-n \<count\> | \--ntasks=\<count\> | Launch a specific number of tasks. |
-| \-N \<count\> | \--nodes=\<count\> | Use a specific number of nodes from the allocation for this step. |
-| \-c \<cpus\> | \--cpus-per-task=\<cpus\> | Allocate a number of CPUs for each task. |
-| \--cpu-bind=\<type\> |  | Specifies how tasks should be bound to CPUs (e.g., cores, threads). |
-| \--gpus-per-task=\<num\> |  | Allocate a specific number of GPUs for each task. |
-| \-l | \--label | Prepend the task number to each line of its output. |
-| \--multi-prog |  | Run a different program for each task, specified in a configuration file. |
+**How it Works**
+`salloc` blocks until the resource allocation is granted. Once granted, it runs the specified command [or a default shell](cite: 2128). When the command or shell exits, the allocation is relinquished. This is ideal for interactive work, debugging, and compiling.
 
-**Example srun usage:**
+**Key Options**
+`salloc` accepts nearly all the same resource request options as `sbatch`, such as:
 
-* **Inside an sbatch script (as seen above):** srun ./my\_program  
-* **Interactively (within an salloc shell):** srun \-n 64 \-N 2 \--gpus-per-task=1 ./gpu\_program
+* `-N, --nodes=<count>`
+* `-n, --ntasks=<count>`
+* `-c, --cpus-per-task=<count>`
+* `--mem=<size>`
+* `-t, --time=<time>`
+* `-p, --partition=<name>`
+* `-G, --gpus=<count>`
+* `--no-shell`: Allocate resources but do not run a command or shell. The allocation can then be used with `srun --jobid=<jobid>`.
+* `--x11`: Sets up X11 forwarding for graphical applications.
 
-### **salloc: Allocate Resources Interactively**
+### Job Monitoring and Control Commands
 
-The salloc command allocates resources and typically starts a shell on one of the allocated nodes. This is useful for interactive work, debugging, and compiling. All sbatch resource request options (-N, \-n, \-t, etc.) apply to salloc.
+These commands are used to view and manage the state of jobs and the cluster.
 
-**Workflow:**
+#### `squeue`
 
-1. Request resources with salloc.  
-2. Wait for the allocation to be granted.  
-3. A new shell prompt appears on a compute node.  
-4. Use srun to launch parallel tasks within this shell.  
-5. Type exit to relinquish the allocation.
+Views the status of jobs in the SLURM queue.
 
-**Example salloc Session:**
+**Synopsis**
+`squeue [OPTIONS]`
 
-\# Request 2 nodes for 30 minutes from the debug partition  
-$ salloc \-N 2 \-t 00:30:00 \-p debug \-A my\_project
+**Key Options**
 
-salloc: Granted job allocation 65537  
-\# The user is now in a shell on one of the compute nodes
+* `-u, --user=<user>`: Display jobs for a specific user.
+* `-j, --jobs=<jobid_list>`: Display information for specific job IDs.
+* `-p, --partition=<name>`: Display jobs in a specific partition.
+* `-t, --states=<state_list>`: Display jobs in a specific state (e.g., `PENDING`, `RUNNING`).
+* `-A, --account=<account>`: Display jobs for a specific account.
+* `-l, --long`: Display more detailed information.
+* `-s, --steps`: Display job step information.
+* `--start`: Show the expected start time for pending jobs.
 
-\# Run a command across the 2 allocated nodes (64 tasks total)  
-$ srun \-n 64 hostname  
-node01  
-node01  
-...  
-node02  
-...
+**Common Job State Codes**
 
-\# When finished, exit the shell to release the resources  
-$ exit  
-salloc: Relinquishing job allocation 65537
+* **PD (PENDING)**: The job is waiting for resource allocation.
+* **R (RUNNING)**: The job currently has an allocation.
+* **CG (COMPLETING)**: The job is in the process of finishing.
+* **CD (COMPLETED)**: The job finished with an exit code of zero.
+* **F (FAILED)**: The job terminated with a non-zero exit code.
+* **TO (TIMEOUT)**: The job was terminated for exceeding its time limit.
+* **CA (CANCELLED)**: The job was explicitly cancelled.
 
-### **squeue: View the Job Queue**
+#### `scancel`
 
-The squeue command displays the status of jobs in the queue.
+Signals or cancels jobs and job steps.
 
-**Common Options:**
+**Synopsis**
+`scancel [OPTIONS]... [JOBID[.STEPID]]...`
 
-| Option | Long Option | Description |
-| :---- | :---- | :---- |
-| \-u \<user\> | \--user=\<user\> | Show jobs for a specific user. |
-| \--me |  | A shortcut to show only your own jobs. |
-| \-p \<name\> | \--partition=\<name\> | Show jobs in a specific partition. |
-| \-j \<jobid\> | \--jobs=\<jobid\> | Show information for a specific job ID. |
-| \-t \<states\> | \--states=\<states\> | Show jobs in specific states (e.g., PENDING, RUNNING). |
-| \-l | \--long | Show more detailed information. |
-| \--start |  | Show the expected start time for pending jobs. |
+**Key Options**
 
-**Job State Codes:**
+* **Job Filtering:**
+  * `-n, --name=<name>`: Cancel jobs with a specific name.
+  * `-p, --partition=<name>`: Cancel jobs in a specific partition.
+  * `-u, --user=<user>`: Cancel jobs owned by a specific user.
+  * `-t, --state=<state>`: Cancel jobs in a specific state (usually `PENDING`).
+* **Signaling:**
+  * `-s, --signal=<signal>`: Send a specific signal (e.g., `SIGSTOP`, `SIGUSR1`) instead of canceling the job.
+  * `-f, --full`: Signal all processes associated with a job, including the batch script shell and its children.
 
-| Code | State | Description |
-| :---- | :---- | :---- |
-| PD | PENDING | Job is waiting for resource allocation. |
-| R | RUNNING | Job is currently running. |
-| CG | COMPLETING | Job is finishing up. |
-| CD | COMPLETED | Job finished successfully. |
-| F | FAILED | Job terminated with a non-zero exit code. |
-| CA | CANCELLED | Job was cancelled by the user or admin. |
-| TO | TIMEOUT | Job was terminated for exceeding its time limit. |
+#### `sinfo`
 
-### **scancel: Cancel a Job**
+Views information about SLURM nodes and partitions.
 
-The scancel command is used to cancel pending or running jobs.
+**Synopsis**
+`sinfo [OPTIONS]`
 
-**Common Options:**
+**Key Options**
 
-| Option | Long Option | Description |
-| :---- | :---- | :---- |
-| \<job\_id\> |  | Cancel the specified job ID. |
-| \<job\_id\>\_\<array\_id\> |  | Cancel a specific task within a job array. |
-| \-u \<user\> | \--user=\<user\> | Cancel jobs belonging to a specific user. |
-| \-n \<name\> | \--name=\<name\> | Cancel jobs with a specific name. |
-| \-t \<state\> | \--state=\<state\> | Cancel jobs in a specific state (e.g., PENDING). |
+* `-N, --Node`: Display node-oriented information instead of the default partition view.
+* `-l, --long`: Display more detailed information.
+* `-s, --summarize`: Display a summary of partition states.
+* `-p, --partition=<name>`: Display information for a specific partition.
+* `-t, --states=<states>`: Display nodes in a specific state (e.g., `idle`, `alloc`, `drain`).
+* `-R, --list-reasons`: List the reasons why nodes are down or drained.
 
-**Examples:**
+**Common Node State Codes**
 
-* scancel 65537 (Cancels a single job)  
-* scancel 65538\_4 (Cancels task 4 of job array 65538\)  
-* scancel \-u username \-t PENDING (Cancels all pending jobs for username)
+* **alloc**: The node is fully allocated.
+* **idle**: The node is not allocated and available for use.
+* **mix**: The node is partially allocated.
+* **drain**: The node is unavailable for new jobs and waiting for running jobs to complete.
+* **down**: The node is unavailable for use.
 
-### **scontrol: View and Modify SLURM State**
+#### `scontrol`
 
-A powerful administrative and user command to view detailed information about jobs, nodes, and partitions, and to modify job parameters.
+A powerful administrative tool used to view and modify the state of jobs, partitions, nodes, and other SLURM configurations.  **Use with caution.**
 
-**Common User Commands:**
+**Synopsis**
+`scontrol [OPTIONS]... [COMMAND]`
 
-* scontrol show job \<job\_id\>: Shows exhaustive details about a specific job.  
-* scontrol show node \<node\_name\>: Shows details about a specific node.  
-* scontrol show partition \<partition\_name\>: Shows details about a specific partition.  
-* scontrol hold \<job\_id\>: Places a pending job in a user-held state.  
-* scontrol release \<job\_id\>: Releases a user-held job.  
-* scontrol update JobId=\<job\_id\> TimeLimit=\<new\_time\>: Update a parameter of a pending or running job.
+**Key Commands**
 
-### **sinfo: View Node and Partition Information**
+* `show job <jobid>`: Display detailed information about a specific job.
+* `show node <nodename>`: Display detailed information about a specific node.
+* `show partition <name>`: Display detailed information about a partition.
+* `update JobId=<jobid> <param>=<value>`: Modify a parameter for a job. Can change time limits, partitions, QOS, etc.
+* `hold <jobid>`: Place a pending job into a held state.
+* `release <jobid>`: Release a held job.
+* `requeue <jobid>`: Requeue a running, suspended, or finished job.
 
-The sinfo command provides a summary of the state of partitions and the nodes within them.
+### Accounting and Performance Commands
 
-**Common Options:**
+These commands provide historical data and performance metrics.
 
-| Option | Long Option | Description |
-| :---- | :---- | :---- |
-| \-s | \--summarize | Provides a compact summary of nodes per partition. |
-| \-N | \--Node | Displays information in a node-oriented format. |
-| \-l | \--long | Shows more detailed information. |
-| \-p \<name\> | \--partition=\<name\> | Restricts output to a specific partition. |
-| \-t \<states\> | \--states=\<states\> | Show nodes in specific states (e.g., idle, alloc, drain). |
+#### `sacct`
 
-**Example:** sinfo \-p gpu \-o "%10P %.12N %.6D %10T %20C" (Shows partition, nodelist, node count, state, and CPU info for the gpu partition).
+Displays accounting data for completed and running jobs from the SLURM accounting database or log.
+
+**Synopsis**
+`sacct [OPTIONS]`
+
+**Key Options**
+
+* `-j, --jobs=<jobid_list>`: Display accounting data for specific jobs.
+* `-u, --user=<user>`: Display jobs for a specific user.
+* `-A, --accounts=<account>`: Display jobs for a specific account.
+* `-S, --starttime=<time>`: Select jobs that started after a specific time.
+* `-E, --endtime=<time>`: Select jobs that ended before a specific time.
+* `-o, --format=<fields>`: Specify a comma-separated list of fields to display (e.g., `JobID,User,State,Elapsed,MaxRSS`).
+* `-l, --long`: Display a comprehensive set of fields.
+* `-X, --allocations`: Display statistics for the job allocation as a whole, not individual steps.
+
+#### `sstat`
+
+Displays status information and performance metrics for running jobs or steps.
+
+**Synopsis**
+`sstat [OPTIONS]`
+
+**Key Options**
+
+* `-j, --jobs=<jobid.stepid>`: The specific running job or step to query. This option is required.
+* `-a, --allsteps`: Display all running steps for the specified job.
+* `-o, --format=<fields>`: Specify a comma-separated list of fields (e.g., `AveCPU,AveRSS,MaxRSS`).
+* `-p, --parsable`: Create delimited output suitable for scripting.
+
+### Priority and Fairshare Commands
+
+These commands are used when the multifactor priority plugin is enabled.
+
+#### `sprio`
+
+Views the components that make up a job's scheduling priority.
+
+**Synopsis**
+`sprio [OPTIONS]`
+
+**Key Options**
+
+* `-j, --jobs=<jobid>`: Display priority components for a specific job.
+* `-l, --long`: Report more detailed information.
+* `-w, --weights`: Display the configured weights for each priority factor.
+
+#### `sshare`
+
+Views fair-share data for users and accounts.
+
+**Synopsis**
+`sshare [OPTIONS]`
+
+**Key Options**
+
+* `-u, --user=<user>`: Display share information for a specific user.
+* `-A, --account=<account>`: Display share information for a specific account.
+* `-l, --long`: Include normalized usage information in the output.
+
+### Common Syntactic Elements
+
+#### Filename Patterns
+
+Used in options like `-o` and `-e` to create unique output files for jobs and tasks.
+
+* `%j`: Job ID.
+* `%A`: Job array's master job ID.
+* `%a`: Job array index number.
+* `%N`: Short hostname.
+* `%n`: Node identifier relative to the job.
+* `%t`: Task identifier.
+
+#### Job Dependency Syntax (`--dependency=<type:jobid>`)
+
+* `afterok:job_id`: Begins after `job_id` completes successfully [exit code 0](cite: 196).
+* `afterany:job_id`: Begins after `job_id` terminates for any reason.
+* `afternotok:job_id`: Begins after `job_id` terminates with a non-zero exit code.
+* `singleton`: Begins after any previously run job with the same name and user has terminated.

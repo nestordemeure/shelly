@@ -118,5 +118,3 @@ Edit [`config.json`](./config.json) to change the model (defaults to `gpt-4.1-mi
 
 * upstream the new, more lax, greenlighting code
 * shelly seem to remove the current python env when started then killed, why?
-
-* improve on the plugins (making them more exhaustive, but also more concise)
