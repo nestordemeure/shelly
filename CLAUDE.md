@@ -19,9 +19,28 @@ Shelly is a smart terminal assistant that translates natural language into shell
 
 ### Shelly Class
 - Main assistant that interfaces with LLM models via the `llm` library
-- Provides two main tools: `run_command()` and `shell_script()`
+- Provides three main tools: `run_command()`, `shell_script()`, and `man()`
 - Implements safety features with command validation and user confirmation
 - Loads custom plugins and integrates shell history for context
+
+### Available Tools
+
+#### `run_command(command: str)`
+- Executes single shell commands with optional user confirmation
+- Used for individual commands like `ls`, `git status`, etc.
+- Checks against greenlist for automatic execution of safe commands
+
+#### `shell_script(script: str)`
+- Executes multi-line shell scripts with pipes, redirections, and complex logic
+- Always requires user confirmation due to complexity
+- Preserves shell constructs like loops and conditionals
+
+#### `man(command: str)`
+- Retrieves manual page information for commands
+- Shows user `📖 man command` indicator but content stays with LLM
+- **Automatically used** before complex commands (ffmpeg, slurm, docker, etc.)
+- Used when commands fail due to incorrect parameters
+- Helps LLM understand system-specific command behavior and syntax
 
 ## Configuration Features
 

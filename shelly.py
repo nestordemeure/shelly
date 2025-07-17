@@ -256,7 +256,7 @@ class Shelly:
         self.system_prompt = self._create_system_prompt()
         
         # Define tools for the API
-        self.tools = [self.run_command, self.shell_script]
+        self.tools = [self.run_command, self.shell_script, self.man]
     
     def run_command(self, command: str) -> str:
         """Execute a single shell command. Use this for individual commands rather than complex shell scripts."""
@@ -340,6 +340,36 @@ class Shelly:
         except Exception as e:
             error_msg = f"Error executing script: {str(e)}"
             console.print(f"\n[red]❌ {error_msg}[/red]")
+            return error_msg
+    
+    def man(self, command: str) -> str:
+        """Get manual page information for a command. Use this to understand command usage, options, and behavior before suggesting commands to the user."""
+        if not command.strip():
+            return "Error: No command provided"
+        
+        # Display to user that man is being called
+        console.print(f"[blue]📖 man {command}[/blue]")
+        
+        try:
+            # Execute man command with options to get plain text output
+            man_command = f"man {command}"
+            stdout, stderr, returncode = self.shell.run_command(man_command)
+            
+            if returncode != 0:
+                if stderr:
+                    return f"Manual page not found for '{command}': {stderr.strip()}"
+                else:
+                    return f"Manual page not found for '{command}'"
+            
+            if not stdout:
+                return f"Manual page for '{command}' is empty"
+            
+            # Return the full manual page content to the LLM
+            # The user doesn't see this content, only the "man command" indicator above
+            return stdout.strip()
+            
+        except Exception as e:
+            error_msg = f"Error getting manual page for '{command}': {str(e)}"
             return error_msg
     
     def _load_plugins(self, plugin_names: List[str]) -> str:

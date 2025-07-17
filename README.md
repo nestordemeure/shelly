@@ -73,6 +73,8 @@ $ shelly set up a new git repo with a Python .gitignore
 
 Safe commands (`ls`, `cat`, `grep`, etc.) run automatically. Everything else asks for confirmation first. You can always say no and explain why, Shelly will adjust.
 
+Shelly automatically looks up manual pages for complex commands to ensure accurate parameter usage, especially for system-specific tools like `ffmpeg`, `slurm`, and `docker`.
+
 You can also provide Shelly with custom instructions (defined as markdown files in the [plugins/](./plugins/) directory) about your preferred tools and workflows, using the `--plugins` (or `-p`) flag:
 
 ```sh
