@@ -478,14 +478,10 @@ class Shelly:
         if any(d_arg in command for d_arg in disallowed_args):
             return False
 
-        # Get the base command (first word)
-        base_command = command.strip().split()[0] if command.strip() else ""
-        
         # Get greenlist from config, default to read-only commands
         greenlist = CONFIG['greenlist_commands']
-        
-        return base_command in greenlist
-    
+        return (command in greenlist) or any((command.startswith(greenlisted + ' ')) for greenlisted in CONFIG['greenlist_commands'])
+            
     def _truncate_output(self, output: str) -> tuple[str, bool]:
         """Truncate output if it's too long, return (truncated_output, was_truncated)"""
         max_lines = CONFIG['output_truncation']['max_lines']
